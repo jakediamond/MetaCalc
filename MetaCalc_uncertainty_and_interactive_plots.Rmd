@@ -1,0 +1,16 @@
+---
+title: "MetaCalc Uncertainty and Interactive Plots"
+output:
+  html_notebook:
+    toc: true
+    toc_float: true
+      collapsed: false
+      smooth_scroll: TRUE
+    theme: readable
+---
+
+
+```{r}
+source(file.path("src", "01_metabolism_error_propagation.R"))
+```
+
