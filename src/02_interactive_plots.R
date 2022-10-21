@@ -14,7 +14,7 @@ library(tidyverse)
 # NEED TO CLARIFY IF USED CONDUCTIVITY OR SPECIFIC CONDUCTANCE!!!!
 
 # Hourly carbonate system
-df <- readRDS(file.path("data", "02_CO2", "all_hourly_data.RDS"))
+df <- readRDS(file.path("data", "03_CO2", "all_hourly_data.RDS"))
 
 # Plot carbonate system and pH
 p_carb_sys <- plot_ly(data = df, 
@@ -131,7 +131,7 @@ browsable(tagList(p_alk_carb, p_alk_q, p_carb_sys, p_C_O, p_C_Oex))
 
 
 
-ggplot(data = filter(df_carb, month(datetime) == 8,
+ggplot(data = filter(df, month(datetime) == 8,
                      between(CO2ex, -40, 60),
                      between(O2ex, -100, 150)),
        aes(x = CO2ex,
@@ -145,6 +145,12 @@ ggplot(data = filter(df_carb, month(datetime) == 8,
   # ggpubr::stat_regline_equation(label.x = 3, label.y = 32) +
   scale_color_viridis_c() +
   facet_wrap(~year(datetime))
+
+ggsave(file.path("results", "exo2_vs_exco2_august_by_year.png"),
+       dpi = 1200,
+       width = 18,
+       height = 16,
+       units = "cm")
 
 mod = lm(O2ex ~ CO2ex, data = filter(df_carb, month(datetime) == 7))
 summary(mod)

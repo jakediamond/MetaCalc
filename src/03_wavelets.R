@@ -13,35 +13,38 @@ library(tidyverse)
 
 # Load data---------------------------------------------------------------
 # Hourly carbonate system
-df_carb <- read_csv(file.path("data", "02_CO2", "DAM_carbonate_hourly.csv")) %>%
-  mutate(datetime = mdy_hm(datetime),
-         O2_mmolm3 = O2 * 1000 / 32,
-         O2sat = LakeMetabolizer::o2.at.sat.base(Temperature, 1010),
-         O2sat_mmolm3 = O2sat *1000 / 32,
-         O2ex = O2_mmolm3 - O2sat_mmolm3,
-         CO2ex = `CO2 (mmol/m3)` - `Atmosphere CO2 (mmol/m3)`)
+df <- readRDS(file.path("data", "03_CO2", "all_hourly_data.RDS"))
 
-my.w <- analyze.wavelet(df_carb, "O2ex",
-                        loess.span = 0,
-                        dt = 1/24, dj = 1/100,
-                        lowerPeriod = 1/2,
-                        upperPeriod = 365,
-                        make.pval = FALSE, n.sim = 10)
+# my.w <- analyze.wavelet(df, "O2ex",
+#                         loess.span = 0,
+#                         dt = 1/24, dj = 1/100,
+#                         lowerPeriod = 1/2,
+#                         upperPeriod = 365,
+#                         make.pval = FALSE, n.sim = 10)
 
-wt.image(my.w, color.key = "quantile", n.levels = 250,
-         legend.params = list(lab = "wavelet power levels", mar = 4.7))
+# wt.image(my.w, color.key = "quantile", n.levels = 250,
+#          legend.params = list(lab = "wavelet power levels", mar = 4.7))
 
+df2 <- filter(df, year(datetime) == 1994)
 
-my.wc <- analyze.coherency(df_carb, my.pair = c("O2ex","CO2ex"),
+my.wc <- analyze.coherency(df2, my.pair = c("O2ex","CO2ex"),
                            loess.span = 0,
                            dt = 1/24, dj = 1/100,
                            lowerPeriod = 1/2,
                            upperPeriod = 365,
-                           make.pval = FALSE)
+                           make.pval = TRUE)
 # Again, we set loess.span = 0 because there is no need to detrend the series; dt = 1/24 means
 # we have 24 observations per time unit (1 day, this actually defines the time unit); lowerPeriod =
 #   1/2 defines the lowest period to be 12 hours. — To plot the cross-wavelet power spectrum:
+at <- seq(1, nrow(df2), by = 24*31) # every active day at 00:00:00
+labels <- strftime(as.POSIXct(df2$datetime[at],
+                              format="%F %T", tz = "GMT"), format ="%b %d")
 
+png(file.path("results", "coherency_exO2_exCO2_1994.png"),
+    width = 18, height = 16, units = "cm", res = 1200)
 wc.image(my.wc, n.levels = 250,
          legend.params = list(lab = "cross-wavelet power levels"),
-         timelab = "", periodlab = "period (days)")
+         timelab = "", periodlab = "period (days)",
+         spec.time.axis = list(at = at, labels = labels),
+         main = "1994–wavelet coherency exO2 and exCO2")
+dev.off()
