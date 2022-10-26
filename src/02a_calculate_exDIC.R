@@ -28,6 +28,26 @@ df_pot <-  carb(flag = 24, # input eq pCO2 with atm. and ALK
                 S = 0,
                 T = df$Temperature)
 
+# 
+# # Test sd of +-pH 0.1
+# df_carb1 <- seacarb::carb(flag = 8, # input pH and ALK
+#                 7,
+#                 0.002, #mmol/L to mol/kg 
+#                 S = 0,
+#                 T = 15)
+# df_carb2 <- seacarb::carb(flag = 8, # input pH and ALK
+#                           6.9,
+#                           0.002, #mmol/L to mol/kg 
+#                           S = 0,
+#                           T = 15)
+# df_carb3 <- seacarb::carb(flag = 8, # input pH and ALK
+#                           7.1,
+#                           0.002, #mmol/L to mol/kg 
+#                           S = 0,
+#                           T = 15)
+# 
+# sd(c(df_carb1$CO2, df_carb2$CO2, df_carb3$CO2))
+
 
 # add exDIC
 df <- df %>%

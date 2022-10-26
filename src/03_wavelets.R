@@ -9,6 +9,7 @@ library(plotly)
 library(htmltools)
 library(lubridate)
 library(WaveletComp)
+library(biwavelet)
 library(tidyverse)
 
 # Load data---------------------------------------------------------------
@@ -33,6 +34,11 @@ my.wc <- analyze.coherency(df2, my.pair = c("O2ex","CO2ex"),
                            lowerPeriod = 1/2,
                            upperPeriod = 365,
                            make.pval = TRUE)
+
+bw <- wtc(d1 = as.matrix(data.frame(t = df2$datetime, co2 = df2$O2ex)), 
+          d2 = as.matrix(data.frame(t = df2$datetime, co2 = df2$CO2ex)),
+          nrands = 10)
+
 # Again, we set loess.span = 0 because there is no need to detrend the series; dt = 1/24 means
 # we have 24 observations per time unit (1 day, this actually defines the time unit); lowerPeriod =
 #   1/2 defines the lowest period to be 12 hours. — To plot the cross-wavelet power spectrum:

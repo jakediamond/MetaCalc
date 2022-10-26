@@ -26,14 +26,16 @@ df_cq <- readxl::read_xlsx(file.path("data", "03_CO2",
 # Quickly calculate Schmidt number for O2 and CO2 (2 eqns each in Raymond et al. 2012)
 df_cq <- df_cq %>%
   rename(temp = `Temp (C)`,
-         Sc_CO2_1 = Schmidt_CO2) %>%
-  mutate(Sc_O2_2 = 1801 - 120.1 * temp + 3.782 * temp^2 - 0.0476 * temp^3,
-         Sc_O2_1 = 1568 - 86.04 * temp + 2.142 * temp^2 - 0.0216 * temp^3,
-         Sc_CO2_2 = 1742 - 91.24 * temp + 2.208 * temp^2 - 0.0219 * temp^3) %>%
-  mutate(Sc_O2_mean = (Sc_O2_1 + Sc_O2_2) / 2,
-         Sc_CO2_mean = (Sc_CO2_1 + Sc_CO2_2) / 2,
-         dSc_O2_mean = abs((Sc_O2_1 - Sc_O2_2)) / sqrt(2),
-         dSc_CO2_mean = abs((Sc_CO2_1 - Sc_CO2_2)) / sqrt(2))
+         Sc_CO2 = Schmidt_CO2) %>%
+  mutate(#Sc_O2_2 = 1801 - 120.1 * temp + 3.782 * temp^2 - 0.0476 * temp^3,
+         Sc_O2 = 1568 - 86.04 * temp + 2.142 * temp^2 - 0.0216 * temp^3,
+         dSc_CO2 = 0,
+         dSc_O2 = 0) #%>%
+         #Sc_CO2_2 = 1742 - 91.24 * temp + 2.208 * temp^2 - 0.0219 * temp^3) %>%
+  # mutate(Sc_O2_mean = (Sc_O2_1 + Sc_O2_2) / 2,
+  #        Sc_CO2_mean = (Sc_CO2_1 + Sc_CO2_2) / 2,
+  #        dSc_O2_mean = abs((Sc_O2_1 - Sc_O2_2)) / sqrt(2),
+  #        dSc_CO2_mean = abs((Sc_CO2_1 - Sc_CO2_2)) / sqrt(2))
 
 # Remove negative GPP and positive ER, only select columns we want
 df_met_clean <- df_met %>%
@@ -57,14 +59,14 @@ df_met_err <- df_met_clean %>%
   mutate(NEP_2.5 = NEP_mean - 1.96*dNEP_mean, # estimate 95% credible interval for NEP
          NEP_97.5 = NEP_mean + 1.96*dNEP_mean)
 
-a <- df_met_err %>%
-  mutate(gpp_dist = map2(GPP_mean, dGPP_mean, ~rnorm(1000, .x, .y)),
-         er_dist = map2(ER_mean, dER_mean, ~rnorm(1000, .x, .y)),
-         nep_dist = map2(gpp_dist, er_dist, ~.x +  .y),
-         nep_mean_mcmc = map_dbl(nep_dist, mean, na.rm = T),
-         nep_sd_mcmc = map_dbl(nep_dist, sd, na.rm = T))
-
-mean(a$nep_sd_mcmc - a$dNEP_mean, na.rm = T)
+# a <- df_met_err %>%
+#   mutate(gpp_dist = map2(GPP_mean, dGPP_mean, ~rnorm(1000, .x, .y)),
+#          er_dist = map2(ER_mean, dER_mean, ~rnorm(1000, .x, .y)),
+#          nep_dist = map2(gpp_dist, er_dist, ~.x +  .y),
+#          nep_mean_mcmc = map_dbl(nep_dist, mean, na.rm = T),
+#          nep_sd_mcmc = map_dbl(nep_dist, sd, na.rm = T))
+# 
+# mean(a$nep_sd_mcmc - a$dNEP_mean, na.rm = T)
 # Get K600 error from Raymond et al. (2012), propagate error in Sc and K600 to KCO2
 df_KCO2_ray <- df_cq %>%
   filter(year(date) > 1992) %>%
@@ -73,14 +75,14 @@ df_KCO2_ray <- df_cq %>%
   group_by(date) %>%
   summarize(K600_ray_mean = mean(value),
             dK600_ray_mean = sd(value)) %>%
-  left_join(select(df_cq, date, Sc_CO2_mean, dSc_CO2_mean), by = "date") %>%
-  mutate_with_error(KCO2_ray_mean ~ K600_ray_mean/((600/Sc_CO2_mean)^(-0.5))) %>%
+  left_join(select(df_cq, date, Sc_CO2, dSc_CO2), by = "date") %>%
+  mutate_with_error(KCO2_ray_mean ~ K600_ray_mean/((600/Sc_CO2)^(-0.5))) %>%
   ungroup()
 
 # Calculate KCO2 from metabolism K600, propagate error in Sc and K600
 df_KCO2_met <- select(df_met_clean, date, contains("K600_mean")) %>%
-  left_join(select(df_cq, date, Sc_CO2_mean, dSc_CO2_mean), by = "date") %>%
-  mutate_with_error(KCO2_met_mean ~ K600_mean/((600/Sc_CO2_mean)^(-0.5))) %>%
+  left_join(select(df_cq, date, Sc_CO2, dSc_CO2), by = "date") %>%
+  mutate_with_error(KCO2_met_mean ~ K600_mean/((600/Sc_CO2)^(-0.5))) %>%
   rename_with(~ str_replace(.x, 
                             pattern = "K600", 
                             replacement = "K600_met"), 
@@ -304,4 +306,10 @@ htmltools::browsable(htmltools::tagList(p_CO2, p_met_q, p_NEP_CO2,
 
 
 
+df_use <- df_cq %>% 
+  left_join(select(df_met_err, date, NEP_mean, dNEP_mean, GPP_mean, dGPP_mean, 
+                   ER_mean, dER_mean, K600_mean, dK600_mean) %>%
+              mutate(across(where(is.numeric), ~.*-1000/32))) %>% #get NEP from atmosphere perspective in mmol
+  mutate_with_error(ray_mean ~ NEP_mean / CO2_ray_mean) %>%
+  mutate_with_error(met_mean ~ NEP_mean / CO2_met_mean)
 
