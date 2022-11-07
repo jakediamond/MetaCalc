@@ -225,17 +225,55 @@ htmltools::browsable(p_DO_clean)
 saveRDS(df_DO, file.path("data", "DO_cleaned_part1.RDS"))
 
 # Now want to compare upstream and downstream to get relationships --------
+df_DO <- readRDS(file.path("data", "DO_cleaned_part1.RDS"))
+
 df_reg <- ungroup(df_DO) %>%
-    filter(site == "belleville", year <= 1994) %>%
-    select(datetime, pos, DO_use)
+  filter(site == "belleville") %>%
+  select(datetime, pos, DO_use) %>%
+  pivot_wider(names_from = pos, values_from = DO_use) %>%
+  mutate(date = date(datetime),
+         hour = hour(datetime)) %>%
+  filter(between(date, ymd(19930101), ymd(19930707))) %>%
+  group_by(date) %>%
+  nest() %>%
+  mutate(mod = map(data, ~lm(.$down~.$up * .$hour)),
+         tid = map(mod, broom::tidy)) %>%
+  select(-mod, -data) %>%
+  unnest(tid)
+
+filter(df_reg, date == ymd(19930605))
+
+ggplot(data = filter(df_reg, term == ".$up", 
+                     between(date, ymd(19930601), ymd(19930707))),
+       aes(x = date, y = estimate)) +
+  geom_point() + geom_line()
 
 
-rm(my.data, my.rec.a, my.rec.b, my.wc)
+ggplot(data = filter(d, date(datetime) == ymd(19930621)) %>%
+         pivot_wider(names_from = pos, values_from = DO_use),
+       aes(x = down,
+           y = up)) +
+  geom_point() + 
+  geom_path(aes(color = hour(datetime)), size = 2) + 
+  scale_color_viridis_c() +
+  theme_classic()
 
+x = filter(df_reg, date(datetime) == ymd(19930626)) 
 
+mod <- lm(up~down*hour(datetime), data=x)
+summary(mod)
+# plot(mod)
+y = predict(mod, newdata = x)
+plot(y)
+lines(x$up)
+plot(x$down)
+lines(y)
+mean(sqrt((y-x$down)^2))
 
-
-
+model <- hysteresis::fel(x$up,x$down,period=24,times="equal")
+plot(model)
+summary(model)
+hist((model$residuals))
 # Finally, add  back NAs for large chunks of missing data (i.e., >=1 day)
 # because the filter can't adequately fill these gaps
 df_DO <- df_DO %>%
@@ -347,13 +385,14 @@ plot_ly(data = select(x, datetime, DO_mgL, filtered, DOsea, DOstin, DOkal) %>% p
 
 
 
-
-y = filter.(df_DO, between(date(datetime), ymd(19930101), ymd(20220805)),
-            site == "chinon", pos == "up")
+rm(mod,model)
+z = filter(df, between(date(datetime), ymd(19930101), ymd(20220805)),
+            site == "chinon", pos == "down")
 # x$DOstin = na_interpolation(x$DO, option = "stine")
 # x$DOsea = na_seadec(ts(x$DO, frequency = 24))
 # x$DOkal = na_kalman(x$DO)
-plot_ly(data = select(ungroup(y), datetime, DO_mgL, filtered, DO_use) %>% pivot_longer(cols = -datetime), 
+plot_ly(data = select(z, datetime, DO_mgL, filtered, DO_use) %>% 
+          pivot_longer(cols = -datetime), 
         x = ~datetime,
         y = ~value,
         color = ~name) %>%
@@ -365,13 +404,42 @@ plot_ly(data = select(ungroup(y), datetime, DO_mgL, filtered, DO_use) %>% pivot_
     yaxis = list(title = "DO (mg/L)",
                  range = list(0, 30)))
 
+d <- ungroup(df_DO) %>%
+  filter(site == "chinon") %>%
+  select(datetime, pos, DO_use, DO_mgL)
+
+plot_ly(data = filter(d, between(date(datetime), ymd(20000110), ymd(20220707))), 
+        x = ~datetime,
+        y = ~DO_use,
+        color = ~pos) %>%
+  add_trace(type = "scatter", mode='lines') %>%
+  layout(#yaxis2 = list(overlaying = "y", side = "right",
+    #             title = TeX("\\text{pH}"),
+    #            range = list(6, 11)),
+    xaxis = list(title = ""),
+    yaxis = list(title = "DO (mg/L)",
+                 range = list(0, 30)))
 
 
 
+e <- ungroup(df_DO) %>%
+  filter(site %in% c("belleville", "dampierre"), pos == "up") %>%
+  select(datetime, site, DO_use)
 
+plot_ly(data = filter(e, between(date(datetime), ymd(20100110), ymd(20100707))), 
+        x = ~datetime,
+        y = ~DO_use,
+        color = ~site) %>%
+  add_trace(type = "scatter", mode='lines') %>%
+  layout(#yaxis2 = list(overlaying = "y", side = "right",
+    #             title = TeX("\\text{pH}"),
+    #            range = list(6, 11)),
+    xaxis = list(title = ""),
+    yaxis = list(title = "DO (mg/L)",
+                 range = list(0, 30)))
 
-
-
+l = filter(df_DO,
+           site == "belleville", pos == "up", year == 2010)
 
 plot_ly(data = left_join(my.data,rec_test) %>%
           pivot_longer(cols = -datetime), 
