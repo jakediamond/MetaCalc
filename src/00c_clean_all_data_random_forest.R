@@ -5,7 +5,7 @@
 # -------------------------------------
 
 # Load libraries
-library(lubdridate)
+library(lubridate)
 library(tidyverse)
 library(missForest)
 library(plotly)
@@ -44,9 +44,27 @@ df <- df %>%
   filter(!(sum(is.na(DO_mgL)) > 300 * 24)) %>%
   ungroup()
 
+# Clean up for some known periods of bad data
+# Belleville up from 1997 july 30 00:00 to 1997 august 21 13:00
+clean1 <- filter(df, site == "belleville", pos == "down",
+                 between(datetime, ymd_h(1997073000), ymd_h(1997082113))) %>%
+  select(DO_use)
 
+# Get wide for up and down, then 
+df_w <- df %>%
+  # select(site, pos, date, datetime, DO_use) %>%
+  distinct() %>%
+  pivot_wider(names_from = pos, values_from = DO_use)
+  mutate(df, 
+             case_when(site == "belleville" & pos == "up" &
+                       between(datetime, ymd_h(1997073000), ymd_h(1997082113))) ~
+               as.vector(clean1),
+             TRUE ~ DO_use)
+pivot_wider()
 # Subsample just to test
-x <- filter(df, site == "chinon", between(year, 2005, 2007), pos == "down") %>%
+x <- filter(df, site == "chinon", 
+            between(date, ymd(20050101), ymd(20050301)), 
+            pos == "down") %>%
   select(datetime, site, DO_use) %>%
   # pivot_wider(names_from = pos, values_from = DO) %>%
   left_join(filter(df, pos == "up") %>%
@@ -56,8 +74,14 @@ x <- filter(df, site == "chinon", between(year, 2005, 2007), pos == "down") %>%
   mutate(hour = hour(datetime),
          month = month(datetime))
 
-mod <- lm(DO_use ~ temp_C + rad_Wm2*Q_m3s + pH, data = x)
+summary(x)
+library(nlme)
+mod <- gls(DO_use ~ temp_C*rad_Wm2*Q_m3s*pH*up, data = drop_na(x), corr = corAR1())
 summary(mod)
+plot(mod)
+acf(residuals(mod, type = "normalized"))
+plot(residuals(mod, type = "normalized"))
+
 modpred <- predict(mod, newdata = newd)
 # plot(mod)
 # y = predict(mod, newdata = x)
@@ -68,9 +92,9 @@ lines(modpred)
 lines(newd$up, col = "red")
 mean(sqrt((y-x$down)^2))
 
-xpred <- filter(df, site == "chinon", between(date, ymd(19990709), ymd(19990822)), 
+xpred <- filter(df, site == "chinon", between(date, ymd(20030129), ymd(20030228)), 
                 pos == "down")
-newd <- filter(df, site == "chinon", between(date, ymd(19990729), ymd(19990822)), 
+newd <- filter(df, site == "chinon", between(date, ymd(20030129), ymd(20030228)), 
                pos == "down") %>%
   select(datetime, site, DO_use) %>%
   # pivot_wider(names_from = pos, values_from = DO) %>%
@@ -80,7 +104,7 @@ newd <- filter(df, site == "chinon", between(date, ymd(19990729), ymd(19990822))
             by = c("datetime", "site")) %>%
   mutate(hour = hour(datetime),
          month = month(datetime))
-
+summary(newd)
 
 
 a = filter(df, site == "dampierre", year == 1999)
@@ -128,3 +152,11 @@ plot_ly(data = filter(df, site == "chinon", pos == "up", between(year, 2005, 200
     xaxis = list(title = ""),
     yaxis = list(title = "DO (mg/L)",
                  range = list(0, 30)))
+
+
+plot_ly(data = filter(df, site == "belleville", 
+                      between(date, ymd(19970720), ymd(19970830))),
+        x = ~datetime,
+        y = ~DO_mgL,
+        color = ~pos) %>%
+  add_trace(type = "scatter", mode='lines')
