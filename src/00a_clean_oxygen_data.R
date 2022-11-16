@@ -43,6 +43,16 @@ df <- df %>%
 df <- df %>%
   mutate(DO_mgL = if_else(DO_mgL < 0 | DO_mgL > 30, NA_real_, DO_mgL))
 
+# Summary of the data
+df %>%
+  dplyr::group_by(site, pos) %>%
+  dplyr::summarize(nas = sum(is.na(DO_mgL)),
+            dat = sum(!is.na(DO_mgL)),
+            tot = sum(dat + nas),
+            per = nas / (dat + nas),
+            mindat = min(datetime),
+            maxdat = max(datetime))
+
 # Plot all sites upstream and downstream
 p_DO_raw <- plot_ly(data = dplyr::filter(df, site != "stlaurent"), 
                     x = ~datetime,
@@ -59,7 +69,7 @@ p_DO_raw <- plot_ly(data = dplyr::filter(df, site != "stlaurent"),
                       range = list(0, 30)),
          title = "raw DO data")
 
-browsable(p_DO_raw)
+# browsable(p_DO_raw)
 
 # Nest data by site and period
 # Split into the three periods based on obs. 1993-2003, 2004-2010, 2011-2022
@@ -109,7 +119,7 @@ clean_fun <- function(data,
     mutate(month = month(datetime),
            year = year(datetime),
            ddo = filtered - lag(filtered)) %>%
-    group_by(year, month) %>%
+    group_by(month) %>%
     summarize(ddo_lim = quantile(abs(ddo), 
                                  probs = prob, 
                                  na.rm = TRUE))
@@ -119,11 +129,11 @@ clean_fun <- function(data,
     mutate(month = month(datetime),
            year = year(datetime),
            date = date(datetime)) %>%
-    group_by(month, year, date) %>%
+    group_by(month, date) %>%
     summarize(minDO = min(filtered, na.rm = T),
-           maxDO = max(filtered, na.rm = T)) %>%
+              maxDO = max(filtered, na.rm = T)) %>%
     ungroup() %>%
-    group_by(year, month) %>%
+    group_by(month) %>%
     summarize(do_limmax = quantile(maxDO, 
                          probs = prob, 
                          na.rm = TRUE),
@@ -141,27 +151,38 @@ clean_fun <- function(data,
            year = year(datetime)) %>%
     left_join(del_do) %>%
     left_join(minmax_do) %>%
-    mutate(ddo = DO_mgL - lag(DO_mgL),
+    mutate(ddo = filtered - lag(filtered),
            ddotest = if_else(abs(ddo) > mult * ddo_lim | 
                                (ddo == 0 & DO_mgL > 19) |
                                is.na(ddo), "fail", "pass"),
-           mindotest = if_else(DO_mgL <= minDO, "fail", "pass"),
-           mindomonthtest = if_else(DO_mgL <= do_limmin, "fail", "pass"),
-           maxdomonthtest = if_else(DO_mgL >= do_limmax, "fail", "pass")) %>%
+           mindotest = if_else(filtered <= minDO, "fail", "pass"),
+           mindomonthtest = if_else(filtered <= do_limmin, "fail", "pass"),
+           maxdomonthtest = if_else(filtered >= do_limmax, "fail", "pass")) %>%
     mutate(passfail = paste(ddotest, mindotest, mindomonthtest, maxdomonthtest),
            DO = if_else(str_detect(passfail, "fail"),  NA_real_, filtered )) %>%
     mutate(DO = if_else((is.na(lead(DO)) & lead(DO_mgL) > 19.5 ) |
                           (is.na(lag(DO)) & lag(DO_mgL) > 19.5 ),
                         NA_real_,
+                        DO)) %>%
+    mutate(DO = if_else((is.na(lead(DO)) & lead(ddotest) == "fail") |
+                          (is.na(lag(DO)) & lag(ddotest) == "fail"),
+                        NA_real_,
                         DO))
   
-  # Finally fill the NA where possible
+  # Finally fill the NA where possible, kalman less than 12 h
   data_final <- data_natests %>%
     dplyr::group_by(narun = {narun = rle(is.na(DO)); rep(seq_along(narun$lengths), narun$lengths)}) %>%
     dplyr::mutate(namax = length(is.na(DO))) %>%
-    mutate(DO_use = if_else(namax < 12,
-                            na_kalman(DO),
-                            as.numeric(na_seadec(ts(DO, frequency = 24)))))
+    group_by(year) %>%
+    filter.(!(sum(is.na(DO_mgL)) > 180 * 24)) %>%
+    ungroup()# %>%
+    # mutate(DO_use = na_kalman(DO, maxgap = 12))
+  
+  # Fill in NAs as best as possible with kalman filtering
+  # do_ts <- ts(data_final$DO_use, deltat = 1/(365*24))
+  # do_ts_clean <- imputeTS::na_seasplit(do_ts, algorithm = "kalman")
+  # data_final$DO_use <- as.numeric(do_ts_clean)
+  # data_final
 }
 
 # Define lowpass filter function
@@ -197,19 +218,18 @@ lowpass_fun <- function(data,
 # Apply functions ---------------------------------------------------------
 # Clean the data and use the lowpass filter
 df_n <- df_n %>%
-  filter(site != "stlaurent") %>% #not enough data at st lauren to care
+  filter.(site != "stlaurent") %>% #not enough data at st lauren to care
   mutate(clean = map(data, clean_fun))
 
 # Get all in one dataframe
 df_DO <- unnest(df_n, clean)
-
+a = filter.(df_DO, site == "dampierre", year(datetime) == 1996)
 # Plot all sites upstream and downstream
-p_DO_clean <- plot_ly(data = dplyr::filter(df_DO, site != "stlaurent"), 
+p_DO_clean <- plot_ly(data = dplyr::filter(df_DO2, site == "dampierre"), 
                     x = ~datetime,
-                    y = ~DO_use,
-                    color = ~site,
-                    linetype = ~pos,
-                    colors = c("#1E88E5", "#FFC107", "black", "#D55E00")) %>%
+                    y = ~DO,
+                    color = ~pos) %>%
+                    # colors = c("#1E88E5", "#FFC107", "black", "#D55E00")) %>%
   add_trace(type = "scatter", mode='lines') %>%
   layout(#yaxis2 = list(overlaying = "y", side = "right",
     #             title = TeX("\\text{pH}"),
@@ -222,10 +242,39 @@ p_DO_clean <- plot_ly(data = dplyr::filter(df_DO, site != "stlaurent"),
 htmltools::browsable(p_DO_clean)
 
 # Save data
-saveRDS(df_DO, file.path("data", "DO_cleaned_part1.RDS"))
+saveRDS(df_DO, file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS"))
+
+# A second cleaning -------------------------------------------------------
+df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS")) %>%
+  select(site, pos, year, datetime, period, DO_mgL = DO_use, namax, narun, DO)
+
+# Remove entire years of missing data (more than a half year)
+# Remove DO data again when NA is longer than 3 days, initial na_kalman didn't work
+df_DO <- df_DO %>%
+  group_by(site, pos, year) %>%
+  filter.(!(sum(is.na(DO_mgL)) > 180 * 24)) %>%
+  ungroup() %>%
+  group_by(site, year, pos, narun) %>%
+  mutate(DO_mgL = if_else((namax > 24 * 3)  & is.na(DO), NA_real_, DO_mgL)) %>%
+  ungroup() %>%
+  select(-namax, -narun, -DO)
+
+# Nest data and apply
+df_n <- df_DO %>%
+  group_by(site, pos, period) %>%
+  nest() %>%
+  mutate(clean = map(data, possibly(clean_fun, NA_real_)))
+
+# Get all in one dataframe
+df_clean <- filter.(df_n, !is.na(clean)) %>%
+  unnest(clean)
+
+x = pluck(df_n, 4,2)
+
+
 
 # Now want to compare upstream and downstream to get relationships --------
-df_DO <- readRDS(file.path("data", "DO_cleaned_part1.RDS"))
+df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS"))
 
 df_reg <- ungroup(df_DO) %>%
   filter(site == "belleville") %>%
@@ -386,16 +435,17 @@ plot_ly(data = select(x, datetime, DO_mgL, filtered, DOsea, DOstin, DOkal) %>% p
 
 
 rm(mod,model)
-z = filter(df, between(date(datetime), ymd(19930101), ymd(20220805)),
+z = filter.(df, between(date(datetime), ymd(19930101), ymd(20220805)),
             site == "chinon", pos == "down")
 # x$DOstin = na_interpolation(x$DO, option = "stine")
 # x$DOsea = na_seadec(ts(x$DO, frequency = 24))
 # x$DOkal = na_kalman(x$DO)
-plot_ly(data = select(z, datetime, DO_mgL, filtered, DO_use) %>% 
+plot_ly(data = select(ungroup(z), datetime, DO_mgL, DO_use, -pos, -period, -site) %>% 
           pivot_longer(cols = -datetime), 
         x = ~datetime,
         y = ~value,
-        color = ~name) %>%
+        color = ~name,
+        colors = c("blue", "orange")) %>%
   add_trace(type = "scatter", mode='lines') %>%
   layout(#yaxis2 = list(overlaying = "y", side = "right",
     #             title = TeX("\\text{pH}"),
@@ -453,3 +503,4 @@ plot_ly(data = left_join(my.data,rec_test) %>%
     xaxis = list(title = ""),
     yaxis = list(title = "DO (mg/L)",
                  range = list(0, 30)))
+LakeMetabolizer::o2.at.sat()

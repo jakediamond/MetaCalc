@@ -37,7 +37,7 @@ df_q <- df_q %>%
 df_qw <- pivot_wider(df_q, names_from = site, values_from = Q_m3s) 
 
 # Only need data from 1990, add a month and year column 
-df_qw <- filter(df_qw, year(date) > 1989) %>%
+df_qw <- filter.(df_qw, year(date) > 1989) %>%
   mutate(month = month(date),
          year = year(date))
 
@@ -70,7 +70,7 @@ df_q_2122 <- read_csv(file.path("data", "01_EDF", "hourly EDF data",
          month = month(date))
 
 # Add this to the end of the dataframe
-df_qw <- filter(df_q_2122, date > max(df_qw$date)) %>%
+df_qw <- filter.(df_q_2122, date > max(df_qw$date)) %>%
   bind_rows(df_qw) %>%
   arrange(date)
 
@@ -161,11 +161,10 @@ df_tclean <- df_t %>%
             
 # Load radiation data -----------------------------------------------------
 # Read Vienne radation from SAFRAN
-df_rv <- read_csv(file.path("data", "01_EDF", "hourly EDF data", "Vienne",
-                            "Radiation.csv"))
+df_rv <- read_csv(file.path("data", "01b_radiation", "radiation_vienne.csv"))
 
 # Read in radiation from Orleans
-df_ro <- readRDS(file.path("data", "light_dampierre_for_metab"))
+df_ro <- readRDS(file.path("data", "01b_radiation", "light_dampierre_for_metab"))
 
 # Clean the Orleans data (in umol/m2/s, want W/m2...weird past conversion)
 df_ro <- df_ro %>%
@@ -234,5 +233,14 @@ df_all <- df_all %>%
 # Clean data and save
 df_all <- df_all %>%
   select(-qmatch, -rmatch)
+ 
+# Add the depth info ------------------------------------------------------
+df_all <- df_all %>%
+  mutate(depth_m = case_when(site == "belleville" ~ 0.3207 + sqrt(Q_m3s) * 0.052,
+                             site == "dampierre" ~ 0.6171 + sqrt(Q_m3s) * 0.0716,
+                             site == "chinon" ~ 0.4092 + sqrt(Q_m3s) * 0.0721,
+                             site == "civaux" ~ -0.916 + log(Q_m3s) * 0.647)
+  )
 
-saveRDS(df_all, file.path("data", "temp_discharge_rad_data.RDS"))  
+# save everything
+saveRDS(df_all, file.path("data", "05_hourly_data_clean", "temp_discharge_rad_data.RDS"))  

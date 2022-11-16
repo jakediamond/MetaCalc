@@ -10,6 +10,7 @@ library(htmltools)
 library(lubridate)
 library(patchwork)
 library(tidyverse)
+library(tidytable)
 
 # Load data---------------------------------------------------------------
 # Daily C fluxes and all variables
@@ -167,12 +168,12 @@ ggplot(data = df_gs,
 
 # Calculate winter ratio of NEP to CO2 flux -------------------------------
 df %>%
-  filter(NEP <= 0) %>%
-  filter(CO2flux_gCm2d > 0) %>%
-  filter(NEP_gCm2d < CO2flux_gCm2d) %>%
-  filter(month < 5 | month > 8) %>%
-  filter(temp_C < 15, Q_m3s > 300) %>%
-  filter(wyear < 2022) %>%
+  filter.(NEP <= 0) %>%
+  filter.(CO2flux_gCm2d > 0) %>%
+  filter.(NEP_gCm2d < CO2flux_gCm2d) %>%
+  filter.(month < 5 | month > 8) %>%
+  filter.(temp_C < 15, Q_m3s > 300) %>%
+  filter.(wyear < 2022) %>%
   select(date, wyear, month, NEP_gCm2d, CO2flux_gCm2d) %>%
   pivot_longer(cols = c(NEP_gCm2d, CO2flux_gCm2d)) %>%
   left_join(df_q) %>%
@@ -213,12 +214,12 @@ ggplot(data = df,
 #   labs(y = expression(mean~flux~to~atmosphere~"("*g~C~m^{-2}~d^{-1}*")"))
 
 df %>%
-  filter(NEP <= 0) %>%
-  filter(CO2flux_gCm2d > 0) %>%
-  filter(NEP_gCm2d < CO2flux_gCm2d) %>%
-  filter(month < 5 | month > 8) %>%
-  filter(temp_C < 15, Q_m3s > 300) %>%
-  filter(wyear < 2022) %>%
+  filter.(NEP <= 0) %>%
+  filter.(CO2flux_gCm2d > 0) %>%
+  filter.(NEP_gCm2d < CO2flux_gCm2d) %>%
+  filter.(month < 5 | month > 8) %>%
+  filter.(temp_C < 15, Q_m3s > 300) %>%
+  filter.(wyear < 2022) %>%
   select(date, year, month, NEP_gCm2d, CO2flux_gCm2d) %>%
   mutate(wyear = if_else(month > 9, year+1, year)) %>%
   pivot_longer(cols = c(NEP_gCm2d, CO2flux_gCm2d)) %>%
@@ -242,20 +243,24 @@ df %>%
 
 
 df %>%
-  filter(NEP <= 0) %>%
-  filter(CO2flux_gCm2d > 0) %>%
-  filter(NEP_gCm2d < CO2flux_gCm2d) %>%
-  filter(month < 5 | month > 8) %>%
-  filter(temp_C < 15, Q_m3s > 100) %>%
+  filter.(NEP <= 0) %>%
+  filter.(CO2flux_gCm2d > 0) %>%
+  filter.(NEP_gCm2d < CO2flux_gCm2d) %>%
+  filter.(month < 5 | month > 8) %>%
+  filter.(temp_C < 15, Q_m3s > 100) %>%
   select(date, wyear, Q_m3s, NEP_gCm2d, CO2flux_gCm2d) %>%
   pivot_longer(cols = c(NEP_gCm2d, CO2flux_gCm2d)) %>%
+  mutate(period = if_else(wyear < 2005, "phyto", "macro")) %>%
   # mutate(value = if_else(value ==0, 0.001, value)) %>%
   # filter(wyear < 2022) %>%
   ggplot(aes(x = Q_m3s,
              y = value,
              color = name)) +
+             # linetype = period,
+             # group = interaction(name, period))) +
   scale_x_log10() +
   scale_y_log10() +
+  # facet_wrap(~wyear) +
   # annotation_logticks() +
   stat_summary_bin() +
   stat_smooth(method = MASS::rlm, formula = y ~ x) +
@@ -271,11 +276,11 @@ df %>%
 
 
 df %>%
-  filter(NEP <= 0) %>%
-  filter(CO2flux_gCm2d > 0) %>%
-  filter(NEP_gCm2d < CO2flux_gCm2d) %>%
-  filter(month < 5 | month > 8) %>%
-  filter(temp_C < 15, Q_m3s > 100) %>%
+  filter.(NEP <= 0) %>%
+  filter.(CO2flux_gCm2d > 0) %>%
+  filter.(NEP_gCm2d < CO2flux_gCm2d) %>%
+  filter.(month < 5 | month > 8) %>%
+  filter.(temp_C < 15, Q_m3s > 100) %>%
   select(date, wyear, temp_C, NEP_gCm2d, CO2flux_gCm2d) %>%
   pivot_longer(cols = c(NEP_gCm2d, CO2flux_gCm2d)) %>%
   # filter(wyear < 2022) %>%
