@@ -34,7 +34,7 @@ df_met_site <- df_met %>%
 df <- bind_rows(df, df_met_site)
 
 # clean a bit
-df_clean <- df %>%
+df_clean <- df_clean %>%
   mutate(GPP = if_else(GPP_mean < 0, NA_real_, GPP_mean),
          ER = if_else(ER_mean > 0, NA_real_, ER_mean),
          K600 = K600_daily_mean) %>%
@@ -45,13 +45,16 @@ df_clean <- df %>%
 
 saveRDS(df_clean, file.path("data", "new_metabolism_results_all.RDS"))
 
+df_clean <- readRDS(file.path("data", "02_metabolism", 
+                              "update_metabolism_results.RDS"))
+
 # Quick plot
 ggplot(data = df_clean,
        aes(x = date,
            y = ER)) +
   geom_point() +
   theme_classic() +
-  facet_grid(rows = vars(pos_f), cols = vars(site_f))
+  facet_grid(rows = vars(pos), cols = vars(site))
 
 # ER vs K600
 ggplot(data = df_clean,
@@ -81,7 +84,9 @@ df_ts <- df_ts %>%
 # Get it into usable format
 df_trend <- df_ts %>%
   mutate(trend = map(deco, pluck, "trend"),
+         # season = map(deco, pluck, "seasonal"),
          trend = map(trend, as.numeric)) %>%
+         # season = map(season, as.numeric)) %>%
   select(site, pos, name, trend) %>%
   unnest(trend) %>%
   bind_cols(df_clean %>%
@@ -90,15 +95,15 @@ df_trend <- df_ts %>%
               arrange(site, pos, name, date) %>%
               select(date, site_f, pos_f))
 
-p_trends <- ggplot(data = df_trend,
-       aes(x = date,
-           y = trend,
-           color = name)) +
-  geom_line() +
+p_ts <- ggplot(data = filter(df_trend, name != "K600"),
+       aes(x = date, color = site_f, group = interaction(site_f, name))) +
+  # geom_line(aes(y = season)) +
+  geom_line(aes(y = trend)) +
   theme_classic(base_size = 12) + 
-  facet_grid(rows = vars(pos_f), cols = vars(site_f)) +
+  facet_grid(rows = vars(pos_f)) +
   geom_hline(yintercept = 0) +
-  scale_color_manual(values = c("orange", "blue", "black"))
+  scale_color_manual(values = c("orange", "blue", "black", "red"))
+p_ts
 
 ggsave(plot = p_trends,
        filename = file.path("results", "metabolism_trends.png"),

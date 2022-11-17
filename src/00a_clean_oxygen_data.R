@@ -273,6 +273,81 @@ x = pluck(df_n, 4,2)
 
 
 
+# Plot all daily min and max for trends -----------------------------------
+df_minmax <- read_csv(file.path("data", "01_EDF", "hourly EDF data", 
+                                "hourly_DO.csv"))
+
+df_minmax <- df_minmax %>% 
+  rename(belleville = BEL, dampierre = DAM, chinon = CHB) %>%
+  mutate(datetime = mdy_hm(datetime), date = date(datetime)) %>%
+  pivot_longer(cols = c(belleville, dampierre, chinon), names_to = "site") %>%
+  group_by(site, date) %>%
+  summarize(max = max(value, na.rm = T),
+            min = min(value, na.rm = T)) %>%
+  pivot_longer(cols = c(min, max)) %>%
+  mutate(moyr = ymd(paste(year(date), month(date), "01")),
+         site_f = factor(site)) %>%
+  mutate(site_f = fct_relevel(site_f, "belleville", "dampierre", "chinon"))
+
+p_minmax <- ggplot(df_minmax,
+       aes(x = moyr,
+           y = value,
+           color = name)) +
+  stat_summary(fun = median, geom = "line", size = 1.2) +
+  scale_color_manual(values = c("#0072B2", "#D55E00")) +
+  # stat_smooth(method = "loess", span = 0.1, color = "black") +
+  facet_grid(rows = vars(site_f)) +
+  theme_classic(base_size = 18) +
+  labs(x = "",
+       y = expression("oxygène dissous (mg "*L^{-1}*")")) +
+  theme(axis.title.x = element_blank(),
+        legend.position = "none")
+
+ggsave(plot = p_minmax,
+       filename = file.path("results", "DO_minmax.png"),
+       dpi = 1200,
+       units = "cm",
+       height = 20,
+       width = 28)
+
+# Seasonality
+df_minmax_seas <- df_minmax %>%
+  mutate(month = month(date),
+         season = case_when(month %in% c(3,4,5) ~ "spring",
+                            month %in% c(6,7,8) ~ "summer",
+                            month %in% c(9,10,11) ~ "autumn",
+                            TRUE ~ "winter"),
+         year = year(date)) %>%
+  mutate(seaf = factor(season)) %>%
+  mutate(seaf = fct_relevel(seaf, "spring", "summer", "autumn", "winter")) %>%
+  group_by(year, season, name, site_f ,seaf) %>%
+  summarize(val = mean(value, na.rm = T))
+
+p_seas <- ggplot(data = df_minmax_seas,
+                 aes(x = year,
+                     y = val,
+                     color = name)) +
+  geom_point() + geom_line() +
+  # stat_summary() + stat_summary(geom = "line") +
+  scale_color_manual(values = c("#0072B2", "#D55E00")) +
+  stat_smooth(method = "lm") +
+  ggpubr::stat_regline_equation(formula=y~x) +
+  ggpubr::stat_cor(aes(label = ..p.label..), label.x = 2010) +
+  facet_grid(rows = vars(site_f), cols = vars(seaf)) +
+  theme_classic(base_size = 18) +
+  labs(x = "",
+       y = expression("oxygène dissous (mg "*L^{-1}*")")) +
+  theme(axis.title.x = element_blank(),
+        legend.position = "none")
+
+p_seas
+
+ggsave(plot = p_seas,
+       filename = file.path("results", "DO_minmax_seas_slope.png"),
+       dpi = 1200,
+       units = "cm",
+       height = 20,
+       width = 28)
 # Now want to compare upstream and downstream to get relationships --------
 df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS"))
 
