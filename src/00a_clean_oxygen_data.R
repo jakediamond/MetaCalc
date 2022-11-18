@@ -274,24 +274,64 @@ x = pluck(df_n, 4,2)
 
 
 # Plot all daily min and max for trends -----------------------------------
-df_minmax <- read_csv(file.path("data", "01_EDF", "hourly EDF data", 
-                                "hourly_DO.csv"))
-
-df_minmax <- df_minmax %>% 
+df_hourly_an <- read_csv(file.path("data", "01_EDF", "hourly EDF data", 
+                                "hourly_DO.csv")) %>% 
   rename(belleville = BEL, dampierre = DAM, chinon = CHB) %>%
-  mutate(datetime = mdy_hm(datetime), date = date(datetime)) %>%
+  mutate(datetime = mdy_hm(datetime))
+
+# Load my data
+df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS"))
+
+# Get both together
+df_DO_all <- df_hourly_an %>%
   pivot_longer(cols = c(belleville, dampierre, chinon), names_to = "site") %>%
-  group_by(site, date) %>%
-  summarize(max = max(value, na.rm = T),
-            min = min(value, na.rm = T)) %>%
-  pivot_longer(cols = c(min, max)) %>%
+  mutate(pos = "up") %>%
+  rename(DO_use = value) %>%
+  anti_join(df_DO, by = c("datetime", "site", "pos")) %>%
+  bind_rows(df_DO) %>%
+  mutate(date = date(datetime))
+
+df_minmax <- df_DO_all %>%
+  group_by(site, date, pos) %>%
+  summarize(max = max(DO_use, na.rm = T),
+            min = min(DO_use, na.rm = T)) %>%
+  pivot_longer(cols = c(min, max))
+
+# Get Chinon min max
+df_chi <- readxl::read_xlsx(file.path("data", "01_EDF", "Chinon_1993_2005_FM.xlsx"),
+                            sheet = 4) %>%
+  rename(date = DATE, min = `Mini Amont`, max = `Max amont`) %>%
+  pivot_longer(-date) %>%
+  mutate(site = "chinon", pos = "up", date = as.Date(date))
+
+# Replace this in the data
+df_minmax <- filter(df_minmax, !(site == "chinon" & pos == "up" & 
+                                 between(year(date), 1993, 2005))) %>%
+  bind_rows(df_chi) %>%
   mutate(moyr = ymd(paste(year(date), month(date), "01")),
          site_f = factor(site)) %>%
-  mutate(site_f = fct_relevel(site_f, "belleville", "dampierre", "chinon"))
+  mutate(site_f = fct_relevel(site_f, "belleville", "dampierre", "civaux", "chinon"))
 
-p_minmax <- ggplot(df_minmax,
+# Get temperature
+df_t <- readRDS(file.path("data", "05_hourly_data_clean", 
+                          "temp_discharge_rad_data.RDS")) %>%
+  group_by(site, date) %>%
+  summarize(max = max(temp_C, na.rm = T),
+            min = min(temp_C, na.rm = T)) %>%
+  pivot_longer(cols = c(min, max), values_to = "temp")
+
+# Add temp and calculate %sat
+df_minmax <- left_join(df_minmax, df_t) %>%
+  mutate(DO_sat = ifelse(temp <= 0,
+                         0,
+                         14.652 - 0.41022 * temp + 0.007991 * 
+                           temp^2 - 0.000077774 * temp^3),
+         DO_per = value / DO_sat)
+  
+
+p_minmax <- ggplot(filter(df_minmax, pos == "up"),
        aes(x = moyr,
-           y = value,
+           y = DO_per * 100,
            color = name)) +
   stat_summary(fun = median, geom = "line", size = 1.2) +
   scale_color_manual(values = c("#0072B2", "#D55E00")) +
@@ -299,12 +339,13 @@ p_minmax <- ggplot(df_minmax,
   facet_grid(rows = vars(site_f)) +
   theme_classic(base_size = 18) +
   labs(x = "",
-       y = expression("oxygène dissous (mg "*L^{-1}*")")) +
+       y = expression("oxygène dissous (% sat.)")) +
   theme(axis.title.x = element_blank(),
         legend.position = "none")
+p_minmax
 
 ggsave(plot = p_minmax,
-       filename = file.path("results", "DO_minmax.png"),
+       filename = file.path("results", "DO_minmax_amont_sat.png"),
        dpi = 1200,
        units = "cm",
        height = 20,
@@ -320,12 +361,14 @@ df_minmax_seas <- df_minmax %>%
          year = year(date)) %>%
   mutate(seaf = factor(season)) %>%
   mutate(seaf = fct_relevel(seaf, "spring", "summer", "autumn", "winter")) %>%
-  group_by(year, season, name, site_f ,seaf) %>%
-  summarize(val = mean(value, na.rm = T))
+  group_by(year, season, name, site_f, seaf, pos) %>%
+  summarize(val = median(value, na.rm = T),
+            sat = median(DO_per * 100, na.rm = T))
 
-p_seas <- ggplot(data = df_minmax_seas,
+p_seas <- ggplot(data = filter(df_minmax_seas, pos == "up",
+                               !(site_f == "belleville" & year == 1995)),
                  aes(x = year,
-                     y = val,
+                     y = sat,
                      color = name)) +
   geom_point() + geom_line() +
   # stat_summary() + stat_summary(geom = "line") +
@@ -336,14 +379,14 @@ p_seas <- ggplot(data = df_minmax_seas,
   facet_grid(rows = vars(site_f), cols = vars(seaf)) +
   theme_classic(base_size = 18) +
   labs(x = "",
-       y = expression("oxygène dissous (mg "*L^{-1}*")")) +
+       y = expression("oxygène dissous (% sat.)")) +
   theme(axis.title.x = element_blank(),
         legend.position = "none")
 
 p_seas
 
 ggsave(plot = p_seas,
-       filename = file.path("results", "DO_minmax_seas_slope.png"),
+       filename = file.path("results", "DO_minmax_seas_slope_amont_sat.png"),
        dpi = 1200,
        units = "cm",
        height = 20,
