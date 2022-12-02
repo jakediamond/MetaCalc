@@ -166,11 +166,21 @@ df_rv <- read_csv(file.path("data", "01b_radiation", "radiation_vienne.csv"))
 # Read in radiation from Orleans
 df_ro <- readRDS(file.path("data", "01b_radiation", "light_dampierre_for_metab"))
 
+# More radiation data (Joules/cm2)
+df_ro2 <- readxl::read_excel(file.path("data", "01b_radiation", 
+                                       "DONNEES RAYONNEMENT 2018_2021_Orléans.xlsx")) %>%
+  select(datetime = DATE, orleans = GLO) %>%
+  mutate(datetime = ymd_h(datetime),
+         orleans = orleans * 100^2 / 3600) #convert to W/m2
+
 # Clean the Orleans data (in umol/m2/s, want W/m2...weird past conversion)
 df_ro <- df_ro %>%
   mutate(rad_Wm2 = if_else(is.na(light) & (hour(datetime) < 6 | hour(datetime) >= 21), 
                            0, light / 2.1)) %>%
-  select(datetime, orleans = rad_Wm2)
+  select(datetime, orleans = rad_Wm2) %>%
+  bind_rows(df_ro2) %>%
+  distinct() %>%
+  complete(datetime = seq(ymd_h(1990010100), ymd_h(2022051723), by = "1 hour"))
 
 # Fill in missing NAs for using seasonal kalman filtering
 ro_ts <- ts(df_ro$orleans, deltat = 1/(365*24))
@@ -183,7 +193,7 @@ df_rad <- select(df_ro, datetime, orleans = rad_clean) %>%
               mutate(datetime = mdy_hm(Date)) %>%
               select(datetime, vienne = SW))
 
-# 80352 NAs for vienne
+# 134784 NAs for vienne
 summary(df_rad)
 
 # Fill missing data for vienne

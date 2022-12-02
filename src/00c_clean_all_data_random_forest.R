@@ -7,7 +7,7 @@
 # Load libraries
 library(lubridate)
 library(tidyverse)
-library(missForest)
+library(Amelia)
 library(plotly)
 library(tidytable)
 
@@ -23,7 +23,7 @@ df_pH <- read_csv(file.path("data", "01_EDF", "hourly EDF data", "hourly_pH.csv"
   pivot_longer(cols = -datetime, names_to = "site", values_to = "pH")
 
 # Load DO data
-df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part1.RDS"))
+df_DO <- readRDS(file.path("data", "05_hourly_data_clean", "DO_cleaned_part2.RDS"))
 
 # Combine data and clear workspace
 df <- left_join(df_DO, df_phys) %>%
@@ -31,6 +31,54 @@ df <- left_join(df_DO, df_phys) %>%
   left_join(df_pH)
 
 rm(df_DO, df_phys, df_pH)
+
+
+# Try Amelia --------------------------------------------------------------
+df_am <- select(df, site, pos, datetime, DOper_clean, temp_C, depth_m, 
+                rad_Wm2, pH) %>%
+  group_by(site, pos) %>%
+  arrange(site, pos, datetime) %>%
+  ungroup() %>%
+  mutate(time = row_number(),
+         sitepos = paste(site, pos)) %>%
+  select(-site, -pos, -datetime)
+
+write_csv(df_am, file.path("amelia_dataset.csv"))
+
+AmeliaView()
+
+x = read_csv(file.path("amelia_dataset-imp1.csv")) %>%
+  left_join(select(df, site, pos, datetime) %>%
+              group_by(site, pos) %>%
+              arrange(site, pos, datetime) %>%
+              ungroup() %>%
+              mutate(time = row_number(),
+                     sitepos = paste(site, pos)))
+
+p3 <- plot_ly(data = dplyr::filter(x, site == "belleville"),
+              x = ~datetime) %>%
+  add_trace(y = ~DOper_clean,
+            color = ~pos,
+            colors = c("#1E88E5", "#FFC107"),
+            type = "scatter", mode='lines') %>%
+  # add_trace(y = ~Q_m3s, type = "scatter", mode='lines',
+  #           yaxis="y2", showlegend = FALSE) %>%
+  layout(yaxis2 = list(overlaying = "y", side = "right",
+                       title = "discharge (m3/s)"),
+         xaxis = list(title = ""),
+         yaxis = list(title = "DO (mg/L)",
+                      range = list(0, 270)),
+         title = "1st round clean DO data")
+
+htmltools::browsable(p3)
+
+
+
+
+
+
+
+
 
 # Remove entire years of missing data (more than a half year)
 # Remove DO data again when NA is longer than 3 days, initial na_kalman didn't work

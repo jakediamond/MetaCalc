@@ -141,8 +141,9 @@ predmaxmin <- tibble(doy = 1:365) %>%
   mutate(maxhr = predict(mod_max, newdata = .),
          minhr = predict(mod_min, newdata = .))
 
-# create hourly time series and fill in with max and min at estimated hour
-df_tofill <- tibble(datetime = seq(floor_date(min(df_chi$date), "hours"),
+# create hourly time series to fill in with max and min at estimated hour
+# Chinon
+df_tofill_chi <- tibble(datetime = seq(floor_date(min(df_chi$date), "hours"),
                                    ceiling_date(max(df_chi$date), "hours"),
                                    by = "hours")) %>%
   mutate(doy = yday(datetime),
@@ -153,46 +154,65 @@ df_tofill <- tibble(datetime = seq(floor_date(min(df_chi$date), "hours"),
                         hour(datetime) == minhr ~ min,
                         TRUE ~ NA_real_))
 
-# Impute the hourly data --------------------------------------------------
-# dataframe to fill
-x <- bind_rows(df_tofill, filter(df, site == "chinon", pos == "up")) %>%
-  arrange(datetime)
+# Dampierre
+df_tofill_dam <- tibble(datetime = seq(floor_date(min(df_dam$date), "hours"),
+                                       ceiling_date(max(df_dam$date), "hours"),
+                                       by = "hours")) %>%
+  mutate(doy = yday(datetime),
+         date = date(datetime)) %>%
+  left_join(mutate(predmaxmin, across(everything(), round))) %>%
+  left_join(df_dam) %>%
+  mutate(DO_mgL = case_when(hour(datetime) == maxhr ~ max, 
+                            hour(datetime) == minhr ~ min,
+                            TRUE ~ NA_real_))
+
+# Both
+df_tofill <- bind_rows(df_tofill_dam, df_tofill_chi)
+
+# Impute the max/min to hourly data --------------------------------------------------
+# We know that late fall/winter time data there is rarely a diel signal (e.g. <1 mgL)
+# So we can make imputation easier for these time by filling in the hours
+# with a smooth average
+df_tofill <- df_tofill %>%
+  group_by(date) %>%
+  mutate(DO_mgL = if_else(((doy < 60 | doy > 298) & abs(max-min) < 1),
+                          mean(DO_mgL, na.rm = T),
+                          DO_mgL)) %>%
+  ungroup()
+
+# dataframe to fill, add in known data
+df_tofill <- bind_rows(df_tofill, filter(df, site %in% c("chinon", "dampierre"), 
+                                 pos == "up")) %>%
+  arrange(site, pos, datetime)
 
 # Fill in missing NAs for dampierre using seasonal kalman filtering
-# Get into time series format
-dampierre_ts <- ts(x$DO_mgL, frequency = 365 * 24)
+# Get into time series format, then impute, only for first 8 years,
+# less time to caclulate
+df_imp <- df_tofill %>%
+  group_by(site, pos) %>%
+  nest() %>%
+  mutate(imp = map(data, imputeTS::na_kalman)) %>%
+  select(imp) %>%
+  unnest()
 
-# Only do the first three years with no seasonality to reduce overall 
-# computation time, one extra year to help with imputation
-dampierre_ts_clean1 <- imputeTS::na_kalman(dampierre_ts[1:(365*24*6)])
-
-# This works for periods between June 1 and Sept 15
-# turn everything back to NA
-dam_ts2 <- tibble(DO_int = as.numeric(dampierre_ts_clean1),
-                  DO_mgL = as.numeric(dampierre_ts[1:(365*24*3)]),
-                  datetime = x$datetime[1:(365*24*3)])%>%
-  mutate(doy = yday(datetime),
-         DO_use = if_else((doy < 58 | doy > 334), DO_mgL, DO_int)) #%>%
-  # bind_rows(filter(df, site == "dampierre", pos == "up", 
-  #                  year(datetime) %in% c(1994, 2000)) %>%
-  #             rename(DO_use = DO_mgL)) %>%
-  # arrange(datetime)
-
-# Try again
-dampierre_ts2 <- ts(dam_ts2$DO_use[1:(5*365*24)], frequency = 365 * 24)
-dampierre_ts_clean2 <- imputeTS::na_seadec(dampierre_ts2, "kalman")
-
-
-?imputeTS::na_seasplit
-
-
-z <- tibble(do = as.numeric(dampierre_ts_clean1),
-            tst = as.numeric(dampierre_ts[1:(365*24 *6)]),
-            d = x$datetime[1:(365*24 *6)])
-plot(dampierre_ts2)
+# Plot to review
+z <- tibble(do = df_tofill_chi$DO_mgL,
+            tst = filter(df_imp, site == "chinon", 
+                         datetime <= ymd_h(1997123101)) %>% select(DO_mgL),
+            d = df_tofill_chi$datetime)
 
 plot_ly(data = z, 
         x = ~d) %>%
-  add_trace(y = ~do, type = "scatter", mode='lines') %>%
-  add_trace(y = ~tst, type = "scatter", mode='points', color = I("red"))
+  add_trace(y = ~tst$DO_mgL, type = "scatter", mode='lines') %>%
+  add_trace(y = ~do, type = "scatter", mode='points', color = I("red"))
 
+# Get all data together ---------------------------------------------------
+df_all <- ungroup(df_imp) %>%
+  filter(!(site == "chinon" & datetime >= ymd_h(1998010101))) %>%
+  filter(!(site == "dampierre" & datetime >= ymd_h(1992010101))) %>%
+  bind_rows(df) %>% 
+  arrange(site, pos, datetime) %>%
+  select(site, pos, datetime, DO_mgL, QC)
+
+# Save
+saveRDS(df_all, file.path("data", "01_EDF", "do_timeseries.RDS"))
