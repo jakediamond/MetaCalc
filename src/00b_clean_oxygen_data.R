@@ -57,7 +57,7 @@ htmltools::browsable(p)
 
 # Remove data to clean
 rm(df_rtq)
-# Add the flags from  manual cleaning -------------------------------------
+# Add the flags from manual cleaning -------------------------------------
 # flags
 flags <- readxl::read_xlsx(file.path("data", "do_data_flags.xlsx"))
 
@@ -80,29 +80,54 @@ df_flags <- df %>%
   dplyr::summarize(map2_df(data, flag, fuz_fun))
 
 # Do the cleaning based on manual flags
-df_clean <- df_flags %>%
-  left_join(df, by = c("site", "pos", "datetime")) %>%
+# Linear stuff first
+df_clean_linear <- df_flags %>%
   dplyr::filter(flag == "linear") %>% #do linear first then rejoin other data
+  left_join(df, by = c("site", "pos", "datetime")) %>%
   dplyr::group_by(site, pos, start, end) %>%
   tidyr::nest() %>%
   dplyr::mutate(DOper_clean = map(data, ~ .$DOper - 
                                     coef(lm(DOper~seq_along(datetime), .))[2] * #everything based on %sat
                                     seq_along(.$datetime))) %>%
   unnest(c(data, DOper_clean)) %>%
-  ungroup() %>%
+  ungroup()
+
+# Linear with drop
+df_clean_linear_drop <- df_flags %>%
+  left_join(df, by = c("site", "pos", "datetime")) %>%
+  dplyr::filter(str_detect(flag, "linear_drop")) %>% #do linear first then rejoin other data
+  dplyr::mutate(drop = as.numeric(word(flag, 3, sep = "_"))) %>%
+  dplyr::group_by(site, pos, start, end, drop) %>%
+  tidyr::nest() %>%
+  dplyr::mutate(DOper_clean = map2(data, drop, ~ .y + .x$DOper - 
+                                    coef(lm(DOper~seq_along(datetime), .x))[2] * #everything based on %sat
+                                    seq_along(.x$datetime))) %>%
+  unnest(c(data, DOper_clean)) %>%
+  ungroup()
+  
+# Everything else
+df_clean <- bind_rows(df_clean_linear, df_clean_linear_drop) %>%
   bind_rows(left_join(df_flags, df, by = c("site", "pos", "datetime")) %>% 
-              filter(flag != "linear" | is.na(flag))) %>%
+              filter(!str_detect(flag, "linear") | is.na(flag))) %>%
   arrange(site, pos, datetime) %>%
   mutate(DOper_clean = case_when(flag == "remove" ~ NA_real_,
+                                 str_detect(flag, "rm") ~ if_else(hour(datetime) == as.numeric(word(flag, 2, sep = "_")),
+                                                                  NA_real_,
+                                                                  DOper),
+                                 str_detect(flag, "rd") ~ {if_else(hour(datetime) >= as.numeric(word(flag, 2, sep = "_")) |
+                                                                     hour(datetime) <= as.numeric(word(flag, 3, sep = "_")),
+                                                                   NA_real_,
+                                                                   DOper + as.numeric(word(flag, 4, sep = "_")))},
                                  !is.na(as.numeric(flag)) ~ DOper + as.numeric(flag),
-                                 str_detect(flag, "remove_") ~ {if_else(hour(datetime) >= word(flag, 2, sep = "_") |
-                                                                          hour(datetime) <= word(flag, 3, sep = "_"),
+                                 str_detect(flag, "remove_") ~ {if_else(hour(datetime) >= as.numeric(word(flag, 2, sep = "_")) |
+                                                                          hour(datetime) <= as.numeric(word(flag, 3, sep = "_")),
                                                                         NA_real_,
                                                                         DOper)},
-                                 flag == "linear" ~ DOper_clean,
+                                 str_detect(flag,"linear") ~ DOper_clean,
                                  TRUE ~ DOper)) %>%
   mutate(DO_use_clean = DOper_clean / 100 * do.sat) #convert back to DO from %sat
 
+# Plot
 p2 <- plot_ly(data = dplyr::filter(df_clean, site == "belleville"),
              x = ~datetime) %>%
   add_trace(y = ~DOper_clean,
@@ -188,14 +213,13 @@ df_final <- df_imp %>%
   mutate(DO_mgL = imputed / 100 * do.sat) %>%
   select(-imputed, -do.sat) %>%
   nest_by(site, pos, period) %>%
-  mutate(clean = map(data, lowpass_fun, variable = DO_mgL))
+  mutate(clean = map(data, lowpass_fun, variable = DO_mgL, cutoff_frequency = 0.15))
 
 df_final <- unnest(df_final, clean)
 
-
-p3 <- plot_ly(data = dplyr::filter(ungroup(df_final), site == "belleville"),
+p3 <- plot_ly(data = dplyr::filter(ungroup(df_final2), site == "chinon"),
               x = ~datetime) %>%
-  add_trace(y = ~filtered,
+  add_trace(y = ~DO,
             color = ~pos,
             colors = c("#1E88E5", "#FFC107"),
             type = "scatter", mode='lines') %>%
@@ -209,3 +233,17 @@ p3 <- plot_ly(data = dplyr::filter(ungroup(df_final), site == "belleville"),
          title = "1st round clean DO data")
 
 htmltools::browsable(p3)
+
+# fill back for NAs
+df_final2 <- df_final %>%
+  dplyr::group_by(site, pos, period,
+                  narun = {narun = rle(is.na(DO_mgL)); rep(seq_along(narun$lengths), 
+                                                           narun$lengths)}) %>%
+  dplyr::mutate(namax = length(is.na(DO_mgL))) %>%
+  dplyr::mutate(DO = if_else((is.na(DO_mgL) & namax > 40*24), NA_real_, filtered)) %>%
+  ungroup() %>%
+  select(site, pos, period, datetime, DO)
+
+
+saveRDS(df_final2, file.path("data", "05_hourly_data_clean",
+                          "DO_cleaned_final.RDS"))
