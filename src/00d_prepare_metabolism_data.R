@@ -41,7 +41,7 @@ savefile <- select(df, site, date, solar.time = soltime,
 
 # All data
 saveRDS(savefile, file.path("data", "02_metabolism", "hourly_inputs.RDS"))
-
+savefile <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS"))
 # All discharge data
 qfile <- select(df, site, pos, period, Q_m3s, date) %>%
   group_by(site, pos, period, date) %>%
@@ -79,3 +79,24 @@ list_of_dfs_q %>%
 
 imap(list_of_dfs_q, ~saveRDS(.x, file = file.path("data", "02_metabolism", 
                                                   paste0(.y, "_daily_Q",".RDS"))))
+
+
+
+library(tidyverse)
+
+x = distinct(df_full, solar.time, DO.obs)
+
+# Specific site and position
+df_full <- savefile[savefile$site == "belleville" & savefile$pos == "down", ]
+df_q_full <- df_q_full[df_q_full$site == "belleville" & df_q_full$pos == "down", ]
+
+#n_period = unique(df_full$period)
+#n_site = unique(df_full$site)
+#n_pos = unique(df_full$pos)
+
+#split the data into smaller groups
+#df_split <- split(df_full, ~cut(df_full$datetime, 5) + df_DO$site + df_DO$pos)
+#df_q_split <- split(df_q_full, ~cut(df_q_full$date, 5) + df_DO$site + df_DO$pos)
+
+#unique periods
+n_periods <- unique(df_full$period)

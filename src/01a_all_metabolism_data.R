@@ -41,7 +41,7 @@ lowpass_fun <- function(data,
 
 # Load data and clean---------------------------------------------------------------
 # Data directory
-data_dir <- file.path("data", "02_metabolism")
+data_dir <- file.path("data", "02_metabolism", "newest_metabolism")
 
 # File paths
 files <- fs::dir_ls(data_dir, regexp = "GetFitDaily")
@@ -50,9 +50,9 @@ files <- fs::dir_ls(data_dir, regexp = "GetFitDaily")
 df_met <- files %>% 
   map_dfr(read_csv, .id = "source")
 
-saveRDS(df_met, file.path("data", "02_metabolism", "update_metabolism_results.RDS"))
+saveRDS(df_met, file.path("data", "02_metabolism", "update_metabolism_results_06dec2022.RDS"))
 df_met <- readRDS(file.path("data", "02_metabolism", 
-                            "update_metabolism_results.RDS"))
+                            "update_metabolism_results_06dec2022.RDS"))
 
 # get site and position info
 df_met <- df_met %>%
@@ -73,7 +73,7 @@ df_clean <- df_met %>%
          pos_f = fct_relevel(pos_f, c("up", "down")))
 
 # Little plot
-ggplot(data = df_met_clean,
+ggplot(data = df_clean,
        aes(x = date,
            y = GPP)) +
   # stat_summary() + 
