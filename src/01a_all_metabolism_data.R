@@ -50,9 +50,9 @@ files <- fs::dir_ls(data_dir, regexp = "GetFitDaily")
 df_met <- files %>% 
   map_dfr(read_csv, .id = "source")
 
-saveRDS(df_met, file.path("data", "02_metabolism", "update_metabolism_results_06dec2022.RDS"))
+saveRDS(df_met, file.path("data", "02_metabolism", "update_metabolism_results_07dec2022.RDS"))
 df_met <- readRDS(file.path("data", "02_metabolism", 
-                            "update_metabolism_results_06dec2022.RDS"))
+                            "update_metabolism_results_07dec2022.RDS"))
 
 # get site and position info
 df_met <- df_met %>%
@@ -181,7 +181,7 @@ p_nep <- ggplot(data = df_nep,
                     y = -filtered,
                     color = pos_fr)) +
   # geom_line() +
-  stat_smooth(method = "loess", span = 1/30) +
+  stat_smooth(method = "loess", span = 1/10) +
   theme_classic(base_size = 22) + 
   facet_grid(cols = vars(site_f)) +
   geom_hline(yintercept = 0) +
@@ -207,13 +207,13 @@ df_ts <- ungroup(df_filt) %>%
   mutate(ts = map(data, ~ ts(.x, deltat = 1/365)),
          ts_clean = map(ts, imputeTS::na_seasplit))
 
-x = pluck(df_ts, 6, 1)
+# x = pluck(df_ts, 6, 1)
 
 # Decompose the data
 df_ts <- df_ts %>%
   mutate(deco = map(ts_clean, decompose, "multiplicative")) #, filter = rep(1/5000, 5000))
 
-plot(pluck(df_ts, 10, 11))
+# plot(pluck(df_ts, 10, 11))
 # Get it into usable format
 df_trend <- df_ts %>%
   mutate(trend = map(deco, pluck, "trend"),
@@ -221,8 +221,8 @@ df_trend <- df_ts %>%
          trend = map(trend, as.numeric),
          season = map(season, as.numeric)) %>%
   select(site, pos, name, trend, season) %>%
-  unnest(trend, season) %>%
-  bind_cols(df_filt %>% select(date))
+  unnest(c(trend, season)) %>%
+  bind_cols(ungroup(df_filt) %>% select(date))
 
 p_trends <- ggplot(data = filter(df_trend, name != "K600"),
                    aes(x = date, color = site_f, 

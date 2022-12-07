@@ -37,11 +37,13 @@ savefile <- select(df, site, date, solar.time = soltime,
   ungroup() %>%
   mutate(light = streamMetabolizer::convert_SW_to_PAR(rad_Wm2),
          DO.sat = df_DOsat$do.sat) %>%
-  select(-rad_Wm2, -discharge, -date)
+  select(-rad_Wm2, -discharge, -date) %>%
+  distinct(site, pos, period, solar.time, .keep_all = TRUE)
 
 # All data
 saveRDS(savefile, file.path("data", "02_metabolism", "hourly_inputs.RDS"))
 savefile <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS"))
+
 # All discharge data
 qfile <- select(df, site, pos, period, Q_m3s, date) %>%
   group_by(site, pos, period, date) %>%
@@ -83,12 +85,13 @@ imap(list_of_dfs_q, ~saveRDS(.x, file = file.path("data", "02_metabolism",
 
 
 library(tidyverse)
-
+savefile <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS"))
+qfile <- readRDS(file.path("data", "02_metabolism", "daily_Q_inputs.RDS"))
 x = distinct(df_full, solar.time, DO.obs)
 
 # Specific site and position
-df_full <- savefile[savefile$site == "belleville" & savefile$pos == "down", ]
-df_q_full <- df_q_full[df_q_full$site == "belleville" & df_q_full$pos == "down", ]
+df_full <- savefile[savefile$site == "dampierre" & savefile$pos == "up", ]
+df_q_full <- qfile[qfile$site == "dampierre" & qfile$pos == "up", ]
 
 #n_period = unique(df_full$period)
 #n_site = unique(df_full$site)
@@ -100,3 +103,18 @@ df_q_full <- df_q_full[df_q_full$site == "belleville" & df_q_full$pos == "down",
 
 #unique periods
 n_periods <- unique(df_full$period)
+
+df = df_full[df_full$period == n_periods[2],]
+df_q = df_q_full[df_q_full$period == n_periods[2],]
+
+
+x = filter(savefile, pos == "up", site == "dampierre", period == 1)
+y = distinct(x, solar.time) %>%
+  semi_join(x)
+x[duplicated(x$solar.time),]
+z = distinct(x, solar.time, .keep_all = TRUE)
+
+filter(x, date(solar.time) == ymd(19941231))
+
+savefile <- savefile %>%
+  distinct(site, pos, period, solar.time, .keep_all = TRUE)
