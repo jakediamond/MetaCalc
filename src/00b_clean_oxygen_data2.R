@@ -247,3 +247,28 @@ df_final2 <- df_final %>%
 
 saveRDS(df_final2, file.path("data", "05_hourly_data_clean",
                           "DO_cleaned_final.RDS"))
+
+savefile <- readRDS(file.path("data", "05_hourly_data_clean",
+                              "DO_cleaned_final.RDS"))
+
+# Save as excel
+# daily discharge, too
+savefile %>%
+  mutate(sitepos = paste(site, pos, sep = "_")) %>%
+  group_split(site, pos) -> list_of_dfs
+
+# name of each datafile
+list_of_dfs %>%
+  map(~pull(., sitepos)) %>%
+  map(~unique(.)) -> names(list_of_dfs)
+
+list_of_dfs %>%
+  writexl::write_xlsx(file.path("data", "05_hourly_data_clean", 
+                                                  "DO_time_series.xlsx"))
+
+# name of each sheet will be the site
+savefile %>%
+  group_split(site, pos) -> names(list_of_dfs)
+
+list_of_dfs %>%
+  writexl::write_xlsx(path = "Headwaters/Data/DO_time_series.xlsx")

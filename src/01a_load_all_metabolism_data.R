@@ -10,7 +10,6 @@ library(imputeTS)
 library(lubridate)
 library(tidyverse)
 
-
 # Function to clean data --------------------------------------------------
 lowpass_fun <- function(data, 
                         cutoff_frequency = 30) {
@@ -72,10 +71,32 @@ df_clean <- df_met %>%
   mutate(site_f = fct_relevel(site_f, c("belleville", "dampierre", "civaux", "chinon")),
          pos_f = fct_relevel(pos_f, c("up", "down")))
 
+# Save this
+df_clean %>%
+  select(-site_f, -pos_f, -year) %>%
+  mutate(sitepos = paste(site, pos, sep = "_")) %>%
+  group_split(sitepos) -> list_of_dfs
+
+# name of each datafile
+list_of_dfs %>%
+  map(~pull(., sitepos)) %>%
+  map(~unique(.)) -> names(list_of_dfs)
+
+list_of_dfs %>%
+  writexl::write_xlsx(file.path("data", "02_metabolism", 
+                                "loire_metabolism.xlsx"))
+
+# name of each sheet will be the site
+savefile %>%
+  group_split(site, pos) -> names(list_of_dfs)
+
+list_of_dfs %>%
+  writexl::write_xlsx(path = "Headwaters/Data/DO_time_series.xlsx")
+
 # Little plot
 ggplot(data = df_clean,
        aes(x = date,
-           y = GPP)) +
+           y = ER)) +
   # stat_summary() + 
   # stat_smooth(method = "lm") +
   geom_point() +
@@ -85,13 +106,14 @@ ggplot(data = df_clean,
 # ER vs K600
 ggplot(data = df_clean,
        aes(x = K600,
-           y = ER)) +
+           y = ER,
+           color = year(date))) +
+  scale_color_viridis_c() +
   geom_point() +
   theme_classic() +
   facet_grid(rows = vars(pos_f), cols = vars(site_f)) +
   scale_y_continuous(limits = c(-40, 0)) +
   scale_x_continuous(limits = c(0, 15))
-
 
 # Estimate of K600 amont et aval-----------------------------------------------
 df_k <- select(df_clean, site_f, pos_f, date, K600) %>%

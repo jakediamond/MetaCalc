@@ -82,39 +82,39 @@ list_of_dfs_q %>%
 imap(list_of_dfs_q, ~saveRDS(.x, file = file.path("data", "02_metabolism", 
                                                   paste0(.y, "_daily_Q",".RDS"))))
 
-
-
-library(tidyverse)
-savefile <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS"))
-qfile <- readRDS(file.path("data", "02_metabolism", "daily_Q_inputs.RDS"))
-x = distinct(df_full, solar.time, DO.obs)
-
-# Specific site and position
-df_full <- savefile[savefile$site == "dampierre" & savefile$pos == "up", ]
-df_q_full <- qfile[qfile$site == "dampierre" & qfile$pos == "up", ]
-
-#n_period = unique(df_full$period)
-#n_site = unique(df_full$site)
-#n_pos = unique(df_full$pos)
-
-#split the data into smaller groups
-#df_split <- split(df_full, ~cut(df_full$datetime, 5) + df_DO$site + df_DO$pos)
-#df_q_split <- split(df_q_full, ~cut(df_q_full$date, 5) + df_DO$site + df_DO$pos)
-
-#unique periods
-n_periods <- unique(df_full$period)
-
-df = df_full[df_full$period == n_periods[2],]
-df_q = df_q_full[df_q_full$period == n_periods[2],]
-
-
-x = filter(savefile, pos == "up", site == "dampierre", period == 1)
-y = distinct(x, solar.time) %>%
-  semi_join(x)
-x[duplicated(x$solar.time),]
-z = distinct(x, solar.time, .keep_all = TRUE)
-
-filter(x, date(solar.time) == ymd(19941231))
-
-savefile <- savefile %>%
-  distinct(site, pos, period, solar.time, .keep_all = TRUE)
+# 
+# 
+# library(tidyverse)
+# savefile <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS"))
+# qfile <- readRDS(file.path("data", "02_metabolism", "daily_Q_inputs.RDS"))
+# x = distinct(df_full, solar.time, DO.obs)
+# 
+# # Specific site and position
+# df_full <- savefile[savefile$site == "dampierre" & savefile$pos == "up", ]
+# df_q_full <- qfile[qfile$site == "dampierre" & qfile$pos == "up", ]
+# 
+# #n_period = unique(df_full$period)
+# #n_site = unique(df_full$site)
+# #n_pos = unique(df_full$pos)
+# 
+# #split the data into smaller groups
+# #df_split <- split(df_full, ~cut(df_full$datetime, 5) + df_DO$site + df_DO$pos)
+# #df_q_split <- split(df_q_full, ~cut(df_q_full$date, 5) + df_DO$site + df_DO$pos)
+# 
+# #unique periods
+# n_periods <- unique(df_full$period)
+# 
+# df = df_full[df_full$period == n_periods[2],]
+# df_q = df_q_full[df_q_full$period == n_periods[2],]
+# 
+# 
+# x = filter(savefile, pos == "up", site == "dampierre", period == 1)
+# y = distinct(x, solar.time) %>%
+#   semi_join(x)
+# x[duplicated(x$solar.time),]
+# z = distinct(x, solar.time, .keep_all = TRUE)
+# 
+# filter(x, date(solar.time) == ymd(19941231))
+# 
+# savefile <- savefile %>%
+#   distinct(site, pos, period, solar.time, .keep_all = TRUE)
