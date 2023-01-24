@@ -10,21 +10,54 @@ library(lubridate)
 library(tidyverse)
 
 # Load error propagation function
-source(file.path("src", "00_error_propagation_function.R"))
+source(file.path("src", "000_error_propagation_function.R"))
 
 # Load data and clean---------------------------------------------------------------
 # Load metabolism data
-df_met <- list.files(path = file.path("data", "02_metabolism", "new_metabolism"), 
-                 pattern = "GetFitDaily",
-                 full.names = TRUE) %>% 
-  map_dfr(read_csv, show_col_types = FALSE)
+df_met <- df_met <- readRDS(file.path("data", "02_metabolism", 
+                                      "update_metabolism_results_07dec2022.RDS"))
 
-# Load discharge, K600, and CO2 data
-df_cq <- readxl::read_xlsx(file.path("data", "03_CO2", 
-                                      "DAM_K600_Flux_all_Eq.xlsx"))
+# get site and position info
+df_met <- df_met %>%
+  dplyr::mutate(source = str_extract(source, "([^/]+$)"),
+                source = str_remove(source, ".csv")) %>%
+  separate(col = source, into = c("type", "site", "pos", "period"), sep = "_") %>%
+  select(-`...1`, -type)
+
+  # list.files(path = file.path("data", "02_metabolism", "newest_metabolism"), 
+#                  pattern = "GetFitDaily",
+#                  full.names = TRUE) %>% 
+#   map_dfr(read_csv, show_col_types = FALSE, id = "filename")
+# 
+# # Clean just a bit for site and position 
+# df_met <- df_met %>%
+#   mutate(name = gsub(".*GetFitDaily_","", filename),
+#          name = gsub(".csv", "", name),
+#          site = strsplit(name, "_")[[1]][1],
+#          pos = strsplit(name, "_")[[1]][2],
+#          period = strsplit(name, "_")[[1]][3])
+# 
+# saveRDS(df_met2, file.path("data", "02_metabolism", "newest_metabolism.RDS"))
+
+# Load discharge, and K600 from Raymond equations data
+df_kray <- readxl::read_xlsx(file.path("data", "03_CO2", 
+                                      "DAM_K600_Raymond_eq.xlsx"))
+
+# Load pCO2  data from CO2SYS with uncertainty
+df_co2sys <- readxl::read_xlsx(file.path("data", "03_CO2", 
+                                       "pCO2_uncertainty.xlsx"))
+
+# Clean up column names
+df_co2sys <- df_co2sys %>%
+  select(date = datetime,
+         pCO2_ppmv = `pCO2 (ppmv)`, #partial pressure of CO2 in water
+         dpCO2_ppmv = `u_pCO2 (ppmv)`, #standard error uncertainty
+         CO2_mmolm3 = `CO2 (mmol/m3)`, #same but in mmol/m3
+         dCO2_mmolm3 = `u_CO2 (mmol/m3)`,
+         CO2_atm = `Atmospheric CO2 (mmol/m3)`)
 
 # Quickly calculate Schmidt number for O2 and CO2 (2 eqns each in Raymond et al. 2012)
-df_cq <- df_cq %>%
+df_kray <- df_kray %>%
   rename(temp = `Temp (C)`,
          Sc_CO2 = Schmidt_CO2) %>%
   mutate(#Sc_O2_2 = 1801 - 120.1 * temp + 3.782 * temp^2 - 0.0476 * temp^3,
@@ -37,9 +70,10 @@ df_cq <- df_cq %>%
   #        dSc_O2_mean = abs((Sc_O2_1 - Sc_O2_2)) / sqrt(2),
   #        dSc_CO2_mean = abs((Sc_CO2_1 - Sc_CO2_2)) / sqrt(2))
 
-# Remove negative GPP and positive ER, only select columns we want
+# Remove negative GPP and positive ER, only select columns we want, only Dampierre
 df_met_clean <- df_met %>%
-  filter(year(date) > 1992) %>% #data before 1992 unreliable
+  filter(site == "dampierre", pos == "up") %>% #,
+         # year(date) > 1992) %>% #data before 1992 unreliable
   mutate(GPP_mean = if_else(GPP_mean < 0, 0, GPP_mean),
          ER_mean = if_else(ER_mean > 0, 0, ER_mean)) %>%
   select(date, 
@@ -67,21 +101,22 @@ df_met_err <- df_met_clean %>%
 #          nep_sd_mcmc = map_dbl(nep_dist, sd, na.rm = T))
 # 
 # mean(a$nep_sd_mcmc - a$dNEP_mean, na.rm = T)
+
 # Get K600 error from Raymond et al. (2012), propagate error in Sc and K600 to KCO2
-df_KCO2_ray <- df_cq %>%
-  filter(year(date) > 1992) %>%
+df_KCO2_ray <- df_kray %>%
+  # filter(year(date) > 1992) %>%
   select(date, contains("K600_Raymond")) %>%
   pivot_longer(-date) %>%
   group_by(date) %>%
   summarize(K600_ray_mean = mean(value),
             dK600_ray_mean = sd(value)) %>%
-  left_join(select(df_cq, date, Sc_CO2, dSc_CO2), by = "date") %>%
+  left_join(select(df_kray, date, Sc_CO2, dSc_CO2), by = "date") %>%
   mutate_with_error(KCO2_ray_mean ~ K600_ray_mean/((600/Sc_CO2)^(-0.5))) %>%
   ungroup()
 
 # Calculate KCO2 from metabolism K600, propagate error in Sc and K600
 df_KCO2_met <- select(df_met_clean, date, contains("K600_mean")) %>%
-  left_join(select(df_cq, date, Sc_CO2, dSc_CO2), by = "date") %>%
+  left_join(select(df_kray, date, Sc_CO2, dSc_CO2), by = "date") %>%
   mutate_with_error(KCO2_met_mean ~ K600_mean/((600/Sc_CO2)^(-0.5))) %>%
   rename_with(~ str_replace(.x, 
                             pattern = "K600", 
@@ -90,17 +125,29 @@ df_KCO2_met <- select(df_met_clean, date, contains("K600_mean")) %>%
 
 # Now we want to calculate CO2 fluxes with the two different K's
 df_CO2 <- left_join(df_KCO2_met, df_KCO2_ray) %>%
-  left_join(select(df_cq, CO2_w = `CO2 (mmol/m3)`, CO2_a = `CO2_atm (mmol/m3)`,
-                   depth = `Depth (m)`, date)) %>%
-  mutate(dCO2_w = 0, dCO2_a = 0, ddepth = 0) %>% #no uncertainty in [CO2] and depth
-  mutate_with_error(CO2_ray_mean ~ depth * (CO2_w - CO2_a) * KCO2_ray_mean) %>%
-  mutate_with_error(CO2_met_mean ~ depth * (CO2_w - CO2_a) * KCO2_met_mean) %>%
+  left_join(select(df_kray, date, depth = `Depth (m)`)) %>%
+  left_join(df_co2sys) %>%#select(df_co2sys, CO2_w = `CO2 (mmol/m3)`, 
+             #      CO2_a = `CO2_atm (mmol/m3)`, date)) %>%
+  mutate(dCO2_atm = 0, ddepth = 0) %>% #no uncertainty in atm [CO2] and depth
+  mutate_with_error(CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean) %>%
+  mutate_with_error(CO2_met_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean) %>%
   mutate(CO2_ray_2.5 = CO2_ray_mean - 1.96*dCO2_ray_mean, # estimate 95% credible interval for CO2 fluxes
          CO2_ray_97.5 = CO2_ray_mean + 1.96*dCO2_ray_mean,
          CO2_met_2.5 = CO2_met_mean - 1.96*dCO2_met_mean,
          CO2_met_97.5 = CO2_met_mean + 1.96*dCO2_met_mean)
 
-# Plot time series with uncertainty ---------------------------------------
+
+# Save all data for future reference --------------------------------------
+df_save <- df_CO2 %>%
+  left_join(select(df_met_err, -contains("K600")))
+
+saveRDS(df_save, file = file.path("data", "03_CO2",
+                                  "CO2_with_uncertainty_dampierre_up.RDS"))
+
+write_excel_csv2(df_save, file = file.path("data", "03_CO2",
+                                          "CO2_with_uncertainty_dampierre_up.csv"))
+
+ # Plot time series with uncertainty ---------------------------------------
 # Just plot GPP and ER first
 # Get data in a nice format
 df_p_met <- select(df_met_err, date, GPP_mean, GPP_2.5, GPP_97.5,
@@ -117,7 +164,7 @@ df_p_met_smooth <- df_p_met %>%
                 ~stats::filter(., rep(1/5, 9), sides = 2))) %>%
   ungroup() %>%
   drop_na() %>%
-  left_join(select(df_cq, date, Q = Discharge))
+  left_join(select(df_kray, date, Q = Discharge))
 
 # Plotly plot
 p_met_q <- plot_ly(data = df_p_met_smooth, x=~date,
@@ -149,7 +196,7 @@ htmltools::browsable(p_met_q)
 # Get data together and smooth a bit
 df_p_NEP_CO2 <- df_CO2 %>% 
   select(date, starts_with("CO2")) %>%
-  select(-CO2_w, -CO2_a) %>%
+  select(-CO2_mmolm3, -CO2_atm) %>%
   pivot_longer(cols = -date, names_sep = "_", names_to = c("type", "method", "val_type")) %>%
   bind_rows(select(df_met_err, date, starts_with("NEP")) %>%
               mutate(across(where(is.numeric), ~.*-1000/32)) %>% #get NEP from atmosphere perspective in mmol
