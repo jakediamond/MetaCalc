@@ -41,7 +41,8 @@ df_met <- df_met %>%
 
 # Load discharge, and K600 from Raymond equations data
 df_kray <- readxl::read_xlsx(file.path("data", "03_CO2", 
-                                      "DAM_K600_Raymond_eq.xlsx"))
+                                       "DAM_K600_Flux_all_Eq.xlsx"))
+                                      # "DAM_K600_Raymond_eq.xlsx"))
 
 # Load pCO2  data from CO2SYS with uncertainty
 df_co2sys <- readxl::read_xlsx(file.path("data", "03_CO2", 
@@ -56,26 +57,45 @@ df_co2sys <- df_co2sys %>%
          dCO2_mmolm3 = `u_CO2 (mmol/m3)`,
          CO2_atm = `Atmospheric CO2 (mmol/m3)`)
 
-# Quickly calculate Schmidt number for O2 and CO2 (2 eqns each in Raymond et al. 2012)
+# Quickly calculate Schmidt number CO2 (2 eqns in Raymond et al. 2012)
 df_kray <- df_kray %>%
   rename(temp = `Temp (C)`,
-         Sc_CO2 = Schmidt_CO2) %>%
+         Sc_CO2_1 = Schmidt_CO2) %>%
   mutate(#Sc_O2_2 = 1801 - 120.1 * temp + 3.782 * temp^2 - 0.0476 * temp^3,
-         Sc_O2 = 1568 - 86.04 * temp + 2.142 * temp^2 - 0.0216 * temp^3,
-         dSc_CO2 = 0,
-         dSc_O2 = 0) #%>%
-         #Sc_CO2_2 = 1742 - 91.24 * temp + 2.208 * temp^2 - 0.0219 * temp^3) %>%
-  # mutate(Sc_O2_mean = (Sc_O2_1 + Sc_O2_2) / 2,
-  #        Sc_CO2_mean = (Sc_CO2_1 + Sc_CO2_2) / 2,
-  #        dSc_O2_mean = abs((Sc_O2_1 - Sc_O2_2)) / sqrt(2),
-  #        dSc_CO2_mean = abs((Sc_CO2_1 - Sc_CO2_2)) / sqrt(2))
+         #Sc_O2_1 = 1568 - 86.04 * temp + 2.142 * temp^2 - 0.0216 * temp^3,
+         Sc_CO2_2 = 1742 - 91.24 * temp + 2.208 * temp^2 - 0.0219 * temp^3) %>%
+  mutate(#Sc_O2_mean = (Sc_O2_1 + Sc_O2_2) / 2,
+         Sc_CO2_mean = (Sc_CO2_1 + Sc_CO2_2) / 2,
+         #dSc_O2_mean = abs((Sc_O2_1 - Sc_O2_2)) / sqrt(2),
+         dSc_CO2_mean = abs((Sc_CO2_1 - Sc_CO2_2)) / sqrt(2))
 
-# Remove negative GPP and positive ER, only select columns we want, only Dampierre
-df_met_clean <- df_met %>%
-  filter(site == "dampierre", pos == "up") %>% #,
-         # year(date) > 1992) %>% #data before 1992 unreliable
-  mutate(GPP_mean = if_else(GPP_mean < 0, 0, GPP_mean),
-         ER_mean = if_else(ER_mean > 0, 0, ER_mean)) %>%
+# only Dampierre
+df_dam <- df_met %>%
+  filter(site == "dampierre", pos == "up")#,
+         # year(date) > 1992) %>% #data before 1992 unreliable 
+  
+# Count number of days with GPP and positive ER
+sum(df_dam$ER_mean > 0, na.rm = T) #456, = 3.9%
+sum(df_dam$ER_mean > 0 & df_dam$ER_2.5pct < 0, na.rm = T) #319, 70.0%
+sum(df_dam$GPP_mean < 0, na.rm = T) # 1406 = 11.9%
+sum(df_dam$GPP_mean < 0 & df_dam$GPP_97.5pct > 0, na.rm = T) #1251, 89.0%
+
+# Correlation of GPP and ER to account for in error propagation
+cor_ge <- cor(df_dam$GPP_mean, y = df_dam$ER_mean, use = "pairwise.complete.obs")
+
+# Remove negative GPP and positive ER
+# Set to 0 if biologically impossible, but 95% CI contains 0, otherwise NA
+df_met_clean <- df_dam %>%
+  mutate(GPP_mean = if_else(GPP_mean < 0 & df_dam$GPP_97.5pct > 0, 0, GPP_mean),
+         GPP_mean = if_else(GPP_mean < 0 & df_dam$GPP_97.5pct < 0, NA_real_, GPP_mean),
+         ER_mean = if_else(ER_mean > 0 & df_dam$ER_2.5pct < 0, 0, ER_mean),
+         ER_mean = if_else(ER_mean > 0 & df_dam$ER_2.5pct > NA_real_, 0, ER_mean)) %>%
+  mutate(across(contains("GPP"), ~ifelse(is.na(GPP_mean), NA_real_, .)),
+         across(contains("ER"), ~ifelse(is.na(ER_mean), NA_real_, .)))
+
+# Need to use a sampling of K600 for its standard deviation
+# Otherwise we can have -K600, Which is impossible
+df_met_clean <- df_met_clean %>%
   select(date, 
          GPP_mean, dGPP_mean = GPP_daily_sd, 
          GPP_2.5 = GPP_2.5pct, GPP_97.5 = GPP_97.5pct,
@@ -86,11 +106,12 @@ df_met_clean <- df_met %>%
 
 # Propagate errors ----------------------------------------------
 # Propagate error from GPP and ER to NEP
-# Assume symmetric error around the mean (mostly true) and minimal covariance 
-# between GPP and ER (not true, but the added effect is small)
+# Assume symmetric error around the mean (mostly true) and account for covariance
+# between GPP and ER
 df_met_err <- df_met_clean %>%
-  mutate_with_error(NEP_mean ~ GPP_mean + ER_mean) %>%
-  mutate(NEP_2.5 = NEP_mean - 1.96*dNEP_mean, # estimate 95% credible interval for NEP
+  mutate(NEP_mean = GPP_mean + ER_mean,
+         dNEP_mean = sqrt(dGPP_mean^2 + dER_mean^2 + 2 * cor_ge * dGPP_mean * dER_mean),
+         NEP_2.5 = NEP_mean - 1.96*dNEP_mean, # estimate 95% credible interval for NEP
          NEP_97.5 = NEP_mean + 1.96*dNEP_mean)
 
 # a <- df_met_err %>%
@@ -110,14 +131,14 @@ df_KCO2_ray <- df_kray %>%
   group_by(date) %>%
   summarize(K600_ray_mean = mean(value),
             dK600_ray_mean = sd(value)) %>%
-  left_join(select(df_kray, date, Sc_CO2, dSc_CO2), by = "date") %>%
-  mutate_with_error(KCO2_ray_mean ~ K600_ray_mean/((600/Sc_CO2)^(-0.5))) %>%
+  left_join(select(df_kray, date, Sc_CO2_mean, dSc_CO2_mean), by = "date") %>%
+  mutate_with_error(KCO2_ray_mean ~ K600_ray_mean/((600/Sc_CO2_mean)^(-0.5))) %>%
   ungroup()
 
 # Calculate KCO2 from metabolism K600, propagate error in Sc and K600
-df_KCO2_met <- select(df_met_clean, date, contains("K600_mean")) %>%
-  left_join(select(df_kray, date, Sc_CO2, dSc_CO2), by = "date") %>%
-  mutate_with_error(KCO2_met_mean ~ K600_mean/((600/Sc_CO2)^(-0.5))) %>%
+df_KCO2_met <- select(df_met_clean, date, contains("K600_mean"), K600_2.5, K600_97.5) %>%
+  left_join(select(df_kray, date, Sc_CO2_mean, dSc_CO2_mean), by = "date") %>%
+  mutate_with_error(KCO2_met_mean ~ K600_mean/((600/Sc_CO2_mean)^(-0.5))) %>%
   rename_with(~ str_replace(.x, 
                             pattern = "K600", 
                             replacement = "K600_met"), 
@@ -128,198 +149,57 @@ df_CO2 <- left_join(df_KCO2_met, df_KCO2_ray) %>%
   left_join(select(df_kray, date, depth = `Depth (m)`)) %>%
   left_join(df_co2sys) %>%#select(df_co2sys, CO2_w = `CO2 (mmol/m3)`, 
              #      CO2_a = `CO2_atm (mmol/m3)`, date)) %>%
-  mutate(dCO2_atm = 0, ddepth = 0) %>% #no uncertainty in atm [CO2] and depth
-  mutate_with_error(CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean) %>%
-  mutate_with_error(CO2_met_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean) %>%
-  mutate(CO2_ray_2.5 = CO2_ray_mean - 1.96*dCO2_ray_mean, # estimate 95% credible interval for CO2 fluxes
-         CO2_ray_97.5 = CO2_ray_mean + 1.96*dCO2_ray_mean,
-         CO2_met_2.5 = CO2_met_mean - 1.96*dCO2_met_mean,
-         CO2_met_97.5 = CO2_met_mean + 1.96*dCO2_met_mean)
+  # mutate(dCO2_atm = 0, ddepth = 0) %>% #no uncertainty in atm [CO2] and depth
+  # mutate_with_error(CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean) %>%
+  # mutate_with_error(CO2_met_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean) %>%
+  # left_join(select(b, date, CO2_flux = CO2_met_mean, dCO2_flux = sd)) %>%
+  mutate(CO2_flux = depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean,
+         co2_dist = map2(CO2_mmolm3, dCO2_mmolm3, ~rnorm(1000, .x, .y)),
+         k_dist = map2(K600_met_2.5, K600_met_97.5, 
+                       ~sample(c(runif(1000, .x, .y),
+                                 runif(1000, .x, .y)),
+                               1000, replace = TRUE)),
+         # k_dist = map2(KCO2_met_mean, dKCO2_met_mean, ~rnorm(1000, .x, .y)),
+         f_dist = map2(co2_dist, k_dist, ~depth * (.x - CO2_atm) * .y),
+         # f_mean_mcmc = map_dbl(f_dist, mean, na.rm = T),
+         dCO2_flux = map_dbl(f_dist, sd, na.rm = T) / sqrt(1000),
+         CO2_flux_2.5 = map_dbl(f_dist, quantile, 0.025, na.rm = T),
+         CO2_flux_97.5 = map_dbl(f_dist, quantile, 0.975, na.rm = T)) %>%
+  select(-KCO2_ray_mean, -dKCO2_ray_mean, -co2_dist, -k_dist, -f_dist) #%>%
+  # mutate(#CO2_ray_2.5 = CO2_ray_mean - 1.96*dCO2_ray_mean, 
+  #        #CO2_ray_97.5 = CO2_ray_mean + 1.96*dCO2_ray_mean,
+  #        CO2_2.5 = CO2_flux - 1.96*dCO2_flux, # estimate 95% credible interval for CO2 fluxes
+  #        CO2_97.5 = CO2_flux + 1.96*dCO2_flux)
 
-
+# a <- df_CO2 %>%
+#   mutate(co2_dist = map2(CO2_mmolm3, dCO2_mmolm3, ~rnorm(1000, .x, .y)),
+#          k_dist = map2(KCO2_met_mean, dKCO2_met_mean, ~rnorm(1000, .x, .y)),
+#          f_dist = map2(co2_dist, k_dist, ~depth * (.x - CO2_atm) * .y),
+#          f_mean_mcmc = map_dbl(f_dist, mean, na.rm = T),
+#          f_sd_mcmc = map_dbl(f_dist, sd, na.rm = T))
+# 
+# b <- select(a, -co2_dist, -k_dist, -f_dist) %>%
+#   mutate(sd = f_sd_mcmc / sqrt(1000))
+# saveRDS(df_CO2, "mcmc_CO2_v2_confidenceintervalK.RDS")
+# a <- readRDS("mcmc_CO2.RDS")
+# b <- select(a, -co2_dist, -k_dist) %>%
+#   mutate(se = f_sd_mcmc / sqrt(1000),
+#          twofive = map_dbl(f_dist, quantile, 0.025, na.rm = T),
+#          nine = map_dbl(f_dist, quantile, 0.975, na.rm = T)) %>%
+#   select(-f_dist)
 # Save all data for future reference --------------------------------------
 df_save <- df_CO2 %>%
-  left_join(select(df_met_err, -contains("K600")))
+  select(-contains("ray")) %>%
+  left_join(select(df_met_err, -contains("K600"))) %>%
+  mutate(across(contains(c("GPP", "ER", "NEP")), ~.*1000/32)) #from g O2 to mmmol
 
 saveRDS(df_save, file = file.path("data", "03_CO2",
-                                  "CO2_with_uncertainty_dampierre_up.RDS"))
+                                  "CO2_with_uncertainty_dampierre_up_updated_again.RDS"))
 
-write_excel_csv2(df_save, file = file.path("data", "03_CO2",
-                                          "CO2_with_uncertainty_dampierre_up.csv"))
-
- # Plot time series with uncertainty ---------------------------------------
-# Just plot GPP and ER first
-# Get data in a nice format
-df_p_met <- select(df_met_err, date, GPP_mean, GPP_2.5, GPP_97.5,
-                   ER_mean, ER_2.5, ER_97.5) %>%
-  pivot_longer(cols = -date, names_sep = "_", names_to = c("type", "val_type")) %>%
-  pivot_wider(names_from = val_type, values_from = value) %>%
-  arrange(type, date) %>%
-  imputeTS::na_interpolation()
-
-# Smooth the data for a nicer plot
-df_p_met_smooth <- df_p_met %>% 
-  group_by(type) %>%
-  mutate(across(where(is.numeric),
-                ~stats::filter(., rep(1/5, 9), sides = 2))) %>%
-  ungroup() %>%
-  drop_na() %>%
-  left_join(select(df_kray, date, Q = Discharge))
-
-# Plotly plot
-p_met_q <- plot_ly(data = df_p_met_smooth, x=~date,
-                   color = ~type, 
-                   colors = c("dark green", "black")) %>%
-  add_trace(y= ~ mean, type = "scatter", mode='lines',
-            showlegend = FALSE) %>%
-  add_ribbons(ymin = ~`2.5`,
-              ymax = ~`97.5`,
-              showlegend = FALSE) %>%
-  add_trace(y= ~ Q, type = "scatter", mode='lines',
-            color = I("dark blue"),
-            yaxis="y2",
-            showlegend = FALSE) %>%
-  layout(yaxis2 = list(overlaying = "y", side = "right",
-                       title = TeX("\\text{discharge (} m^{3}  s^{-1})"),
-                       tickfont = list(color = "darkblue"),
-                       titlefont = list(color = "darkblue"),
-                       range = list(0,10000)),
-         xaxis = list(title = ""),
-         yaxis = list(title = TeX("\\text{flux (g } O_{2} m^{-2} d^{-1})")),
-         title = "GPP and ER (river's perspective)",
-         margin = list(r = 50)) %>%
-  config(mathjax = "cdn")
-
-htmltools::browsable(p_met_q)
-
-# Now plot NEP and CO2 flux -----------------------------------------------
-# Get data together and smooth a bit
-df_p_NEP_CO2 <- df_CO2 %>% 
-  select(date, starts_with("CO2")) %>%
-  select(-CO2_mmolm3, -CO2_atm) %>%
-  pivot_longer(cols = -date, names_sep = "_", names_to = c("type", "method", "val_type")) %>%
-  bind_rows(select(df_met_err, date, starts_with("NEP")) %>%
-              mutate(across(where(is.numeric), ~.*-1000/32)) %>% #get NEP from atmosphere perspective in mmol
-              pivot_longer(cols = -date, names_sep = "_", names_to = c("type", "val_type")) %>%
-              mutate(method = "met")) %>%
-  pivot_wider(names_from = val_type, values_from = value) %>%
-  group_by(type, method) %>%
-  arrange(type, method, date) %>%
-  mutate(across(where(is.numeric),
-                ~stats::filter(., rep(1/5, 9), sides = 2))) %>% #smoothing for visualization
-  drop_na(mean, `2.5`, `97.5`) %>%
-  ungroup()
-
-# Plot NEP and CO2
-p_NEP_CO2 <- plot_ly(data = filter(df_p_NEP_CO2, method == "met"), x=~date,
-                     color = ~type, 
-                     colors = c("#1E88E5", "#FFC107")) %>%
-  add_trace(y= ~ mean, type = "scatter", mode='lines') %>%
-  add_ribbons(ymin = ~`2.5`,
-              ymax = ~`97.5`,
-              showlegend = FALSE) %>%
-  # add_trace(y= ~ Q, type = "scatter", mode='lines',
-  #           color = I("dark blue"), linetype = I("solid"),
-  #           yaxis="y2",
-  #           showlegend = FALSE) %>%
-  layout(xaxis = list(title = ""),
-         yaxis = list(title = TeX("\\text{flux (mmol } m^{-2} d^{-1})")),
-         title = TeX("\\text{NEP [} O_{2} \\text{] and } CO_{2,K_{met}} \\text{flux (atm. perspective)}")) %>%
-  config(mathjax = "cdn")
-
-htmltools::browsable(p_NEP_CO2)
-
-# Plot CO2 from metabolism K and raymond K
-p_CO2_ray_met <- plot_ly(data = filter(df_p_NEP_CO2, type == "CO2"), x=~date,
-                     color = ~method, 
-                     colors = c("#1E88E5", "#FFC107")) %>%
-  add_trace(y= ~ mean, type = "scatter", mode='lines') %>%
-  add_ribbons(ymin = ~`2.5`,
-              ymax = ~`97.5`,
-              showlegend = FALSE) %>%
-  # add_trace(y= ~ Q, type = "scatter", mode='lines',
-  #           color = I("dark blue"), linetype = I("solid"),
-  #           yaxis="y2",
-  #           showlegend = FALSE) %>%
-  layout(xaxis = list(title = ""),
-         yaxis = list(title = TeX("\\text{flux (mmol } m^{-2} d^{-1})")),
-         title = TeX("CO_{2,K_{Ray}} \\text{ and } CO_{2,K_{met}} \\text{flux (atm. perspective)}")) %>%
-  config(mathjax = "cdn")
-htmltools::browsable(p_CO2_ray_met)
-
-# Quick ratio of NEP/CO2 efflux
-df_ratio <- df_CO2 %>% 
-  select(date, CO2_ray_mean, dCO2_ray_mean, CO2_met_mean, dCO2_met_mean) %>%
-  left_join(select(df_met_err, date, NEP_mean, dNEP_mean) %>%
-              mutate(across(where(is.numeric), ~.*-1000/32))) %>% #get NEP from atmosphere perspective in mmol
-  mutate_with_error(ray_mean ~ NEP_mean / CO2_ray_mean) %>%
-  mutate_with_error(met_mean ~ NEP_mean / CO2_met_mean)
-
-# for plotting, clean outliers and smooth
-df_p_ratio <- df_ratio %>% 
-  select(date, ray_mean, dray_mean, met_mean, dmet_mean) %>%
-  mutate(across(where(is.numeric), ~if_else(abs(.) > 100, NA_real_, .))) %>%
-  mutate(ray_2.5 = ray_mean - 1.96*dray_mean, # estimate 95% credible interval for NEP
-         ray_97.5 = ray_mean + 1.96*dray_mean,
-         met_2.5 = met_mean - 1.96*dmet_mean,
-         met_97.5 = met_mean + 1.96*dmet_mean) %>%
-  select(-dray_mean, -dmet_mean) %>%
-  pivot_longer(cols = -date, names_sep = "_", names_to = c("type", "val_type")) %>%
-  pivot_wider(names_from = val_type, values_from = value) %>%
-  group_by(type) %>%
-  arrange(type, date) %>%
-  mutate(across(where(is.numeric),
-                ~imputeTS::na_kalman(.))) %>%
-  mutate(across(where(is.numeric),
-                ~stats::filter(., rep(1/5, 9), sides = 2))) %>%
-  drop_na(mean, `2.5`, `97.5`) %>%
-  ungroup()
-
-# Plot ratios from different methods over time
-p_ratios <- plot_ly(data = df_p_ratio, x=~date,
-                     color = ~type, 
-                     colors = c("#1E88E5", "#FFC107")) %>%
-  add_trace(y= ~ mean, type = "scatter", mode='lines') %>%
-  # add_ribbons(ymin = ~`2.5`,
-  #             ymax = ~`97.5`,
-  #             showlegend = FALSE) %>%
-  # add_trace(y= ~ Q, type = "scatter", mode='lines',
-  #           color = I("dark blue"), linetype = I("solid"),
-  #           yaxis="y2",
-  #           showlegend = FALSE) %>%
-  layout(xaxis = list(title = ""),
-         yaxis = list(title = "ratio NEP:CO2 efflux"))
-
-htmltools::browsable(p_ratios)
+write_excel_csv(df_save, file = file.path("data", "03_CO2",
+                                          "CO2_with_uncertainty_dampierre_up_updated_again_decimal.csv"))
 
 
-# Plot CO2 over tiime
-p_CO2 <- plot_ly(data = df_cq, x=~date) %>%
-  add_trace(y= ~ `CO2 (mmol/m3)`, type = "scatter", mode='lines') %>%
-  # add_ribbons(ymin = ~`2.5`,
-  #             ymax = ~`97.5`,
-  #             showlegend = FALSE) %>%
-  add_trace(y= ~ Discharge, type = "scatter", mode='lines',
-            color = I("dark blue"),
-            yaxis="y2",
-            showlegend = FALSE) %>%
-  layout(yaxis2 = list(overlaying = "y", side = "right",
-                       title = TeX("\\text{discharge (} m^{3}  s^{-1})"),
-                       tickfont = list(color = "darkblue"),
-                       titlefont = list(color = "darkblue"),
-                       range = list(0,10000)),
-         xaxis = list(title = ""),
-         yaxis = list(title = TeX("[CO_{2}]\\text{(mmol} m^{-3})")),
-         title = "CO2",
-         margin = list(r = 50)) %>%
-  config(mathjax = "cdn")
-
-htmltools::browsable(p_CO2)
-
-# Plot all the plots together ---------------------------------------------
-
-htmltools::browsable(htmltools::tagList(p_CO2, p_met_q, p_NEP_CO2, 
-                                        p_CO2_ray_met, p_ratios))
 # Old ---------------------------------------------------------------------
 # p <- ggplot(data = df_p_met, aes(x = date)) +
 #   geom_line(aes(y = mean,
@@ -360,3 +240,21 @@ df_use <- df_cq %>%
   mutate_with_error(ray_mean ~ NEP_mean / CO2_ray_mean) %>%
   mutate_with_error(met_mean ~ NEP_mean / CO2_met_mean)
 
+f = flux~CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean
+exprs = list(
+  # expression to compute new variable values
+  deparse(f[[3]]),
+  # expression to compute new variable errors
+  sapply(all.vars(f[[3]]), function(v) {
+    dfdp = deparse(D(f[[3]], v))
+    sprintf('(d%s*(%s))^2', v, dfdp)
+  }) %>%
+    paste(collapse='+') %>%
+    sprintf('sqrt(%s)', .)
+)
+names(exprs) = c(
+  deparse(f[[2]]),
+  sprintf('d%s', deparse(f[[2]]))
+)
+exprs[[2]]
+sqrt(0.89^2*(54.3-20.60)^2*0.4^2 + 0.89^2*0.92^2*16.8^2)
