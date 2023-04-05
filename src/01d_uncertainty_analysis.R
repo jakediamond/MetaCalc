@@ -14,13 +14,12 @@ source(file.path("src", "000_error_propagation_function.R"))
 
 # Load data ---------------------------------------------------------------
 df <- readRDS(file = file.path("data", "03_CO2",
-                                    "CO2_with_uncertainty_dampierre_up_updated_again.RDS")) 
+                                    "CO2_with_uncertainty_dampierre_up_2023-02-21.RDS")) 
 
 # Load discharge, and K600 from Raymond equations data
 df_q <- readxl::read_xlsx(file.path("data", "03_CO2", 
                                        "DAM_K600_Flux_all_Eq.xlsx")) %>%
   select(date, Discharge)
-
 
 # Clean data --------------------------------------------------------------
 # df_clean <- df %>%
@@ -35,7 +34,7 @@ df_q <- readxl::read_xlsx(file.path("data", "03_CO2",
 df_cv <- df %>%
   mutate(ER_mean = abs(ER_mean),
          dCO2_flux = dCO2_flux*sqrt(1000)) %>%
-  mutate_with_error(PR_mean ~ GPP_mean/ER_mean) %>%
+  # mutate_with_error(PR_mean ~ GPP_mean/ER_mean) %>%
   select(date, contains(c("mean", "d")), pCO2_ppmv, CO2_mmolm3, CO2_flux_mean = CO2_flux,
          -depth, -dSc_CO2_mean, -Sc_CO2_mean) %>%
   pivot_longer(cols = -date) %>%
@@ -44,7 +43,12 @@ df_cv <- df %>%
          name3 = str_extract(name2, "(?<=d).*")) %>%
   mutate(name4 = if_else(is.na(name3), name2, name3)) %>%
   select(date, name = name4, type, value) %>%
-  pivot_wider(names_from = type, values_from = value)
+  pivot_wider(names_from = type, values_from = value) %>%
+  mutate(name = case_match(name,
+                           "K600_met" ~ "K600",
+                           "CO2_flux" ~ "fCO2",
+                           "pCO2_ppmv" ~ "pCO2",
+                           .default = name))
 
 
 # calculate cv for each day (sd/mean)
@@ -76,11 +80,55 @@ df_cv %>%
   facet_wrap(~name) +
   scale_x_continuous(limits = c(0, 2)) +
   labs(x = "daily coefficient of variation (SD/mean)")
-ggsave(filename = file.path("results", "uncertainty", "cv_distributions_updated_again.png"),
-       dpi = 600,
+ggsave(filename = file.path("results", "uncertainty", "cv_distributions.png"),
+       dpi = 300,
        units = "cm",
-       height = 16,
+       height = 12,
        width = 18.4)
+
+
+# Calculate central tendency with different measures ----------------------
+df_cent <- df_cv %>%
+  mutate(wt = 1 / sd^2) %>%
+  group_by(name) %>%
+  summarize(mn = mean(mean, na.rm = T),
+            med = median(mean, na.rm = T),
+            wtdmn = weighted.mean(mean, wt, na.rm = T),
+            wtdmed = Hmisc::wtd.quantile(mean, wt, probs = 0.5, normwt = T))
+
+
+
+# Estimate how often NEP or fCO2 were not different than 0 ----------------
+# distributions of the variables based on sampling 1000 times
+df_dist <- df_cv %>%
+  select(-cv) %>%
+  filter(name %in% c("NEP", "fCO2")) %>%
+  pivot_wider(names_from = name, values_from = c(mean, sd)) %>%
+  mutate(fco2_dist = map2(mean_fCO2, sd_fCO2, ~rnorm(1000, .x, .y)),
+         nep_dist = map2(mean_NEP, sd_NEP, ~rnorm(1000, .x, .y)))
+
+# T tests
+df_test <- drop_na(df_dist) %>%
+  mutate(co2_t = map(fco2_dist, t.test),
+         nep_t = map(nep_dist, t.test))
+
+# Tidy output
+df_tidy <- df_test %>%
+  mutate(co2_p = map(co2_t, ~.$p.value),
+         nep_p = map(nep_t, ~.$p.value)) %>%
+  select(date, co2_p, nep_p)
+
+
+  # mutate(fco2_1sd = if_else(sign(fco2/(fco2+sd)
+  #                      0,
+  #                      value)) %>%
+  # mutate(NEP = if_else(sign(filtered_NEP_97.5 / filtered_NEP_2.5) == -1,
+  #                      0,
+  #                      filtered_NEP_mean))
+
+sum(df_tidy$co2_p > 0.01)
+sum(df_tidy$nep_p > 0.01)
+q = filter(df_nepco2_test, NEP == 0)
 
 # Plot time series with uncertainty ---------------------------------------
 # Just plot GPP and ER first
@@ -304,31 +352,3 @@ htmltools::browsable(htmltools::tagList(p_CO2, p_met_q, p_NEP_CO2,
 
 
 
-# Lowpass function --------------------------------------------------------
-
-lowpass_fun <- function(data,
-                        cutoff_frequency = 7) {
-  # Impute all NAs so that there are none with kalman filtering
-  data$value <- imputeTS::na_kalman(data$value)
-  # Order the data, just in case
-  data <- data[with(data, order(date)),]
-  # Sampling rate [s^-1]
-  sr <- 1 / 86400
-  # Nyquist frequency = half the sampling rate
-  nyq <- sr / 2
-  # Cutoff frequency (days^-1)
-  cutoff <- 1 / (cutoff_frequency * 60 * 60 * 24)
-  # Normalized cutoff frequency for Butterworth filter
-  W <- cutoff / nyq
-  # Butterworth low-pass filter, digital, 2nd order
-  myfilter <- signal::butter(2, W, type = 'low', plane = 'z')
-  # Forward-reverse filter to remove phase-shift 
-  # associated with Butterworth filter (must be in vector-form)
-  vec <- as.vector(data$value)
-  filtered <- signal::filtfilt(myfilter, vec)
-  # Filtered data
-  data$filtered <- filtered
-  data <- data[with(data, order(date)), ]
-  # rem <- sr / cutoff
-  # data <- data[-c(1:rem, (nrow(data) - rem):nrow(data)),]
-}

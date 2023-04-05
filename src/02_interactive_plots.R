@@ -15,6 +15,59 @@ library(tidyverse)
 
 # Hourly carbonate system
 df <- readRDS(file.path("data", "03_CO2", "all_hourly_data.RDS"))
+df2 <- readRDS(file.path("data", "02_metabolism", "hourly_inputs.RDS")) %>%
+  filter(site == "dampierre", pos == "down")
+
+df_raw <- readRDS(file.path("data", "01_EDF", "raw", 
+                            "Raw_cond_oxy_pH_temp_1992_2022.rds"))
+
+dam <- filter(df_raw,
+             site == "Dampierre",
+             position == "upstream")
+dam_l <- filter(df_raw, site == "Dampierre") %>%
+  mutate(alpha = 0.0192+8E-5 * Temperature, # alpha constant for spc based on logger specs
+         spc = Conductivity / (1 + alpha * (Temperature - 25))) %>%
+  pivot_longer(cols = c(Conductivity:spc))
+
+# Plot upstream downstream conductivity
+p_cond <- plot_ly(data = filter(dam_l, name == "spc"),
+                    x=~datetime,
+                    y = ~value,
+                    color = ~position) %>%
+  add_trace(type = "scatter", mode='lines') %>%
+  layout(xaxis = list(title = ""),
+         yaxis = list(title = TeX("\\color{#1E88E5}Conductivity~(mu*S~cm^{-1})"),
+                      range = list(0, 460)),
+         title = TeX("\\text{Conductivity upstream downstream}"),
+         margin = list(r = 50)) %>%
+  config(mathjax = "cdn")
+
+browsable(p_cond)
+
+
+# Plot conductivity and discharge
+p_cond_q <- plot_ly(data = left_join(df, select(dam, datetime, Conductivity)) %>%
+                      mutate(alpha = 0.0192+8E-5 * Temperature, # alpha constant for spc based on logger specs
+                             spc = Conductivity / (1 + alpha * (Temperature - 25))), # calculate spc based on logger specs), 
+                      x=~datetime) %>%
+  add_trace(y= ~ Conductivity, type = "scatter", mode='lines', 
+            color = I("#1E88E5"), showlegend = FALSE) %>%
+  add_trace(y= ~ spc, type = "scatter", mode='lines', 
+            color = I("#FFC107"), showlegend = FALSE, yaxis="y2") %>%
+  # add_trace(y= ~ pH, type = "scatter", mode='lines', color = I("black"),
+  #           yaxis="y2", showlegend = FALSE) %>%
+  layout(yaxis2 = list(overlaying = "y", side = "right",
+                       title = TeX("\\text{discharge}"),
+                       range = list(0, 3600)),
+         xaxis = list(title = ""),
+         yaxis = list(title = TeX("\\color{#1E88E5}Conductivity~(mu*S~cm^{-1})"),
+                      range = list(0, 460)),
+         title = TeX("\\text{Conductivity and discharge}"),
+         margin = list(r = 50)) %>%
+  config(mathjax = "cdn")
+
+browsable(p_cond_q)
+
 
 # Plot carbonate system and pH
 p_carb_sys <- plot_ly(data = df, 
@@ -58,11 +111,11 @@ p_alk_q <- plot_ly(data = df,
 browsable(p_alk_q)
 
 # Plot O2 and CO2
-p_C_O <- plot_ly(data = df, 
-                      x=~datetime) %>%
-  add_trace(y= ~ `CO2 std (mmol/m3)`, type = "scatter", mode='lines', 
-            color = I("#1E88E5"), showlegend = FALSE) %>%
-  add_trace(y= ~ O2_mmolm3, type = "scatter", mode='lines', 
+p_C_O <- plot_ly(data = df2, 
+                      x=~solar.time) %>%
+  # add_trace(y= ~ `CO2 std (mmol/m3)`, type = "scatter", mode='lines', 
+  #           color = I("#1E88E5"), showlegend = FALSE) %>%
+  add_trace(y= ~ DO.obs / DO.sat * 100, type = "scatter", mode='lines', 
             color = I("#FFC107"), showlegend = FALSE,
             yaxis="y2", showlegend = FALSE) %>%
   layout(yaxis2 = list(overlaying = "y", side = "right",

@@ -22,11 +22,16 @@ df_carb <- carb(flag = 8, # input pH and ALK
                 T = df$Temperature)
 
 # Potential carbonate system
-df_pot <-  carb(flag = 24, # input eq pCO2 with atm. and ALK
-                df$`Atmosphere CO2 (ppmv)`,
-                df$Alkalinity / 1000, #mmol/L to mol/kg
+df_pot <-  seacarb::carb(flag = 24, # input eq pCO2 with atm. and ALK
+                df_test$atm_co2,
+                df_test$Alk, #mmol/L to mol/kg
                 S = 0,
-                T = df$Temperature)
+                T = df_test$temp)
+
+df_test <- data.frame(temp = df$temp, Alk = x, atm_co2 = df_o2co2$atmosphere_co2_ppmv)
+x = ifelse(is.na(df$Alk), df_o2co2$alkalinity/1000, is.na(df$Alk))
+
+exDIC = (ifelse(is.na(df$DIC), NA_real_, df$DIC/1E9) - df_pot$DIC) * 1000
 
 # 
 # # Test sd of +-pH 0.1
