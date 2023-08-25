@@ -4,9 +4,6 @@
 # Date:
 # -------------------------------------
 # Load libraries
-library(plotly)
-library(htmltools)
-library(lubridate)
 library(patchwork)
 library(tidyverse)
 library(tidytable)
@@ -19,10 +16,10 @@ df_nepco2 <- readRDS(file.path("data", "03_CO2", "NEP_CO2_archetype.RDS"))
 
 # Fraction of year by archetype -------------------------------------------
 p_doy <- df_nepco2 %>%
-  mutate(wyear = if_else(month > 9, year + 1, year),
+  mutate(wyear = if_else(month > 8, year + 1, year),
          origin = ymd(paste0(wyear-1, "1001"))) %>%
   mutate(dowy = as.numeric(interval(origin, date))/86400 + 1,
-         datewy = ymd(paste(if_else(month > 9, "1970", "1971"), 
+         datewy = ymd(paste(if_else(month > 8, "1970", "1971"), 
                             month, day(date), sep = "-"))) %>%
   ggplot(aes(x = datewy,
              y = (..count..),

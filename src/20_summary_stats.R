@@ -6,35 +6,80 @@
 # Load libraries
 library(plotly)
 library(htmltools)
-library(lubridate)
 library(tidyverse)
-library(tidytable)
+library(patchwork)
+# library(tidytable)
 
 # Load data ---------------------------------------------------------------
 df_nepco2 <- readRDS(file.path("data", "03_CO2", "NEP_CO2_archetype.RDS"))
 
 # Median estimates
-df_mediandaily <- df_nepco2 %>%
+df_mediandaily_wt <- df_nepco2 %>%
   mutate(state = if_else(year < 2005, "planktonic", "benthic"),
          nepco2 = filtered_NEP_mean / filtered_CO2_meanenh) %>%
-  group_by(archetype, state) %>%
+  # filter(archetype %in% c("heterotrophic_source", "autotrophic_sink")) %>%
+  # filter(str_detect(archetype, "sink")) %>%
+  # filter(archetype == "heterotrophic_source") %>%
+  # group_by(archetype, state) %>%
+  # group_by(year) |>
   drop_na(filtered_CO2_meanenh, filtered_NEP_mean) %>%
-  summarize(mCO2 = median(filtered_CO2_meanenh),
+  summarize(
+    mCO2 = weighted.mean(filtered_CO2_meanenh, abs(filtered_CO2_meanenh)),
+            mNEP = weighted.mean(filtered_NEP_mean, filtered_NEP_mean),
+            mNEPco2 = weighted.mean(nepco2, abs(filtered_CO2_meanenh)))
+            # mCO2 = median(filtered_CO2_meanenh),
             # dCO2 = quantile(filtered_CO2_meanenh),
-            mNEP = median(filtered_NEP_mean),
+            # mNEP = median(filtered_NEP_mean),
             # dNEP = IQR(filtered_NEP_mean),
-            mNEPco2 = median(nepco2))
+            # mNEPco2 = median(nepco2))
             # dNEPco2 = IQR(nepco2))
+
+a <- ggplot(data = filter(df_mediandaily_wt, year != 1997),
+            aes(x = mNEPco2 * 100)) +
+  geom_histogram() + 
+  theme_classic(base_size = 16) + 
+  labs(x = expression(mean~annual~internal~CO[2]~production~"(%)"))
+a
 
 # Year sums of CO2 and NEP
 df_y <- df_nepco2 %>%
   mutate(dNEP = (filtered_NEP_2.5 - filtered_NEP_mean) / 1.96,
-         dCO2 = (filtered_CO2_97.5enh - filtered_CO2_meanenh) / 1.96) %>%
-  group_by(year) %>%
+         dCO2 = (filtered_CO2_97.5enh - filtered_CO2_meanenh) / 1.96,
+         wy = if_else(month(date) > 8, year + 1, year)) |>
+  group_by(wy) %>%
+  # filter(archetype == "autotrophic_sink") |>
+  # filter(archetype == "autotrophic_sink") |>
+  # filter(str_detect(archetype, "sink")) |>
   summarize(totCO2 = sum(filtered_CO2_meanenh, na.rm = T),
             dtotCO2 = sqrt(sum(dCO2^2)),
             totNEP = sum(filtered_NEP_mean),
             dtotNEP = sqrt(sum(dNEP^2)))
+
+x <- df_y |>
+  mutate(nepco2 = totNEP/totCO2)
+
+
+b <- ggplot(data = x,
+            aes(x = totCO2 / 1000)) +
+  geom_histogram(fill = "#0072B2") + 
+  theme_classic(base_size = 16) + 
+  labs(x = expression(annual~FCO[2]~production~"("*mol~m^{-2}~y^{-1}*")"))
+b
+
+c <- ggplot(data = x,
+            aes(x = -totNEP / 1000)) +
+  geom_histogram(fill = "#E69F00") + 
+  theme_classic(base_size = 16) + 
+  labs(x = expression(annual~NEP~"("*mol~m^{-2}~y^{-1}*")"))
+c
+
+p <- b + c + a
+ggsave(plot = p,
+       filename = file.path("results", "annual_budget_summary_histograms.png"),
+       units = 'cm',
+       dpi = 300,
+       height = 12,
+       width = 34)
 
 # Yearly sums based on archeytpe and autotrophic state
 df_arch <- df_nepco2 %>%

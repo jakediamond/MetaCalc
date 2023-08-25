@@ -12,7 +12,7 @@ library(tidyverse)
 library(tidytable)
 
 # Load all data
-df <- readRDS(file.path("data", "03_CO2", "all_hourly_data_complete.RDS"))
+df <- readRDS(file.path("data", "03_CO2", "all_hourly_data_complete_updateSpC_AT_Ca.RDS"))
 
 # Load just daily NEP and co2 data
 df_nepco2 <- readRDS(file.path("data", "03_CO2", "NEP_CO2_archetype.RDS"))
@@ -50,10 +50,11 @@ p_ts_mo <- ggplot(data = df_nepco2,
   theme_classic(base_size = 10) + 
   geom_hline(yintercept = 0) + 
   theme(legend.position = c(0.05, 0.85),
+        legend.key.height = unit(0.25, "cm"),
         legend.title = element_blank(),
         legend.background = element_rect(fill = "transparent")) +
   labs(x = "",
-       y = expression(fCO[2]~"("*mmol~m^{-2}~d^{-1}*")"))
+       y = expression(FCO[2]~"("*mmol~m^{-2}~d^{-1}*")"))
 
 p_ts_mo
 
@@ -93,14 +94,15 @@ p_pH <- ggplot(data = df,
 p_pH 
 
 # pH plot
-p_alk <- ggplot(data = df,
+p_alk <- ggplot(data = mutate(df, alk = if_else(is.na(AT), Alk_molkg * 1e6, AT*1000)) %>%
+                  filter(between(alk, 1200, 2300)),
                aes(x = datetime)) +
-  geom_line(aes(y = Alk_molkg * 1e6),  linewidth = 0.8) + 
+  geom_line(aes(y = alk),  linewidth = 0.8) + 
   theme_classic(base_size = 10) + 
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank()) +
   labs(x = "",
-       y = expression(Alk~"("*mmol~m^{-3}*")"))
+       y = expression(A[T]~"("*mmol~m^{-3}*")"))
 p_alk 
 
 # temp plot
@@ -126,7 +128,7 @@ p_q <- ggplot(data = distinct(df, date, discharge),
 p_q 
 
 p <- p_do / p_t / p_pH / p_c / p_alk / p_q / p_ts_mo 
-p
+# p
 
 ggsave(plot = p,
        filename = file.path("results", "FigS1_timeseries.png"),

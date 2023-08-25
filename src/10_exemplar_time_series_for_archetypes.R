@@ -588,3 +588,24 @@ exp(-3.18)*exp(2.53*-1)
            y = Alk_molkg)) +
   geom_line()) %>%
   ggplotly()
+
+I = 1.441E-5*300
+S = 54*I
+pH = 8
+
+AT = 0.0015
+
+seacarb::carb(flag = 8,
+              var1 = pH,
+              var2 = AT,
+              T = 20,
+              S = S,
+              # k1k2 = "m06",
+              pHscale = "F")
+
+seacarb::carb(flag = 8,
+              var1 = pH,
+              var2 = AT,
+              T = 20,
+              S = 0,
+              pHscale = "F")

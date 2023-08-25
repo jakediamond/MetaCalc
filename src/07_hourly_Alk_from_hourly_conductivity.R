@@ -6,7 +6,6 @@
 
 # Load libraries
 library(plotly)
-library(lubridate)
 library(broom)
 library(tidyverse)
 
@@ -15,41 +14,18 @@ source(file.path("src", "000_lowpass_function.R"))
 
 # Load raw hourly data --------------------------------------------------------
 # All time series from EDF, just want conductivity
-df_raw <- readRDS(file.path("data", "01_EDF", "raw", 
-                            "Raw_cond_oxy_pH_temp_1992_2022.rds"))
+df_cond <- readRDS(file.path("data", "05_hourly_data_clean", "cond_damup.RDS"))
 
-# Only for Dampierre upstream
-df_dam <- filter(df_raw,
-                 site == "Dampierre",
-                 position == "upstream") %>%
-  select(datetime, SpC = Conductivity)
-
-# Apply a lowpass filter to Conductivity
-df_dam <- lowpass_fun(df_dam, cutoff_frequency = 8)
-
-p <- plot_ly(data = df_dam,
-            x  = ~datetime) %>%
-  add_trace(y = ~ SpC, type = "scatter", mode='lines', 
-            color = I("#1E88E5"), showlegend = FALSE) %>%
-  add_trace(y = ~ filtered, type = "scatter", mode='lines', 
-            color = I("#FFC107"), showlegend = FALSE, yaxis="y2") %>%
-  layout(yaxis2 = list(overlaying = "y", side = "right",
-                       title = TeX("\\color{#FFC107}{CCPP~(mg~CaCO_{3}~L^{-1})}")),
-         xaxis = list(title = ""),
-         yaxis = list(title = TeX("\\color{#1E88E5}{LSI~(-)}")),
-         title = TeX("\\text{Langelier Saturation Index and Calcium Carbonate Precipitation Potential}"),
-         margin = list(r = 50)) %>%
-  config(mathjax = "cdn")
-
-htmltools::browsable(p)
+# daily data for discharge and temperature and pH
+df_d <- readRDS(file.path("data", "03_CO2", "dampierre_all_daily_data.RDS"))
 
 # Load best hourly measurements for Dampierre (not conductivity)
 df_dam_hr <- read_csv(file.path("data", "03_CO2", "DAM_full_correct_hourly.csv"))
 
 # Get needed data together
 df <- select(df_dam_hr, year = Year, month = Month, datetime, Q_m3s = Discharge, 
-             depth_m = Depth, temp = `Temp (C)`, pH, Alk_molm3 = Alkalinity) %>%
-  right_join(df_dam) %>%
+             depth_m = Depth, temp = `Temp (C)`, pH, Alk_molm3 = Alkalinity, O2 = Oxy) %>%
+  right_join(df_damup) %>%
   mutate(date = date(datetime))
 
 # Look at regression
@@ -58,12 +34,29 @@ ggplot(data = df,
            y = Alk_molm3)) + 
   geom_point()
 
-summary(MASS::rlm(Alk_molm3 ~ filtered, data = df))
+df_mod <- df %>%
+  group_by(date) %>%
+  summarize(across(where(is.numeric), mean))
+
+ggplot(data = df_mod,
+       aes(x = filtered,
+           y = Alk_molm3)) + 
+  geom_point()
+
+mod <- lm(Alk_molm3 ~ filtered*Q_m3s*O2+temp+pH+month, data = df_mod)
+summary(mod)
+plot(mod)
+summary(MASS::rlm(Alk_molm3 ~ filtered*Q_m3s*O2+temp+pH+month, data = df_mod))
 # Alk (mol/m3) = 0.0061 * Spc (uS/cm) + 0.1804
 
 # Estimate hourly Alkalinity (mol/m3) = (mmol/L), need to divide by 1000 for mol/L or mol/kg
 df <- mutate(df,
-             Alk_molkg = (0.0061 * filtered + 0.1804) / 1000)
+             Alk_molkg = (0.0061 * filtered + 0.1804) / 1000,
+             Alk2 = (-0.069 + 0.00696 * filtered + 0.00083 * Q_m3s + 0.0186 * O2 +
+                       0.0015 * temp + 0.0118 * pH - 0.0017 * month - 
+                       4.1E-6 * filtered * Q_m3s - 8.56E-5 * filtered * O2 -
+                       4.1E-5 * Q_m3s * O2 + 1.93E-7 * filtered * Q_m3s * O2)
+                      / 1000)
 
 
 # Estimate CO2 system

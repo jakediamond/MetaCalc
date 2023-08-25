@@ -20,13 +20,21 @@ df_carb <- carb(flag = 8, # input pH and ALK
                 df$Alkalinity / 1000, #mmol/L to mol/kg 
                 S = 0,
                 T = df$Temperature)
-
+df <- tail(df, 200)
 # Potential carbonate system
 df_pot <-  seacarb::carb(flag = 24, # input eq pCO2 with atm. and ALK
-                df_test$atm_co2,
-                df_test$Alk, #mmol/L to mol/kg
+                df$`Atmosphere CO2 (ppmv)`,
+                df$Alkalinity / 1000, #mmol/L to mol/kg
                 S = 0,
-                T = df_test$temp)
+                pHscale = "F",
+                T = df$Temperature)
+
+df_pot2 <-  seacarb::carb(flag = 21, # input eq pCO2 with atm. and ALK
+                         df$`Atmosphere CO2 (ppmv)`,
+                         df$pH, #mmol/L to mol/kg
+                         S = 0,
+                         pHscale = "F",
+                         T = df$Temperature)
 
 df_test <- data.frame(temp = df$temp, Alk = x, atm_co2 = df_o2co2$atmosphere_co2_ppmv)
 x = ifelse(is.na(df$Alk), df_o2co2$alkalinity/1000, is.na(df$Alk))

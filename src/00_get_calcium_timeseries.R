@@ -107,8 +107,8 @@ p_CaSC <- ggplot(data = df_wq_q,
 p_CaSC
 
 # Look at HCO3 vs SC
-p_HSC <- ggplot(data = df_wq_q,
-                 aes(x = SC,
+p_HSC <- ggplot(data = filter(df_wq_q, between(month,5,9)),
+                 aes(x = Conductivity,
                      y = HCO3*1000 /(61.0168))) +
   geom_point() +
   stat_smooth(method = "lm") +
@@ -123,12 +123,15 @@ p_HSC <- ggplot(data = df_wq_q,
 p_HSC
 
 p <- (p_CaSC + p_HSC) / (p_qCa + p_qH) +plot_annotation(tag_levels = "a")
+
 ggsave(plot = p,
        filename = file.path("results", "ca_hco3_q_sc.png"),
        dpi = 300,
        units = "cm",
        width = 18.4,
        height = 12)
+
+
 # Quick look at specific conductivity from NAIDES vs EDF
 ggplot(data = df_wq_q,
        aes(x = log(Discharge),

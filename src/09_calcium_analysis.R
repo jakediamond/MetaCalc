@@ -6,8 +6,8 @@
 
 # Load libraries
 library(plotly)
-library(lubridate)
 library(broom)
+library(patchwork)
 library(tidyverse)
 
 # Load functions ----------------------------------------------------------
@@ -72,7 +72,8 @@ tab <- df_wq_sum %>%
   arrange(solute) %>%
   pivot_wider(names_from = solute, values_from = text) %>%
   arrange(season)
-write_csv(tab, file.path("results", "wq_summary.csv"))
+# write_csv(tab, file.path("results", "wq_summary.csv"))
+
 # Estimate specific conductivity and look at calcium contribution ---------
 # Estimate conductivity with ions
 df_cond <- df_wq %>%
@@ -104,10 +105,61 @@ df_cond <- df_wq %>%
     # Theoretical conductivity based on concentration (uS/cm)
     SpC_t = sum(conc_M * charge * eq_cond) * 1000,
     # Theoretical conductivity based on activity (uS/cm)
-    SpC_t_act = sum(act * charge * eq_cond) * 1000)
+    SpC_t_act = sum(act * charge * eq_cond) * 1000,
+    # Each ion contribution to conductivity
+    SpC_cont = act * charge * eq_cond * 1000) %>%
+  mutate(SpC_per = SpC_cont / SpC_t_act * 100) # ion cont. as a percent
+
+# Plot of these contributions over a year
+# For the labels
+df_lab <- ungroup(df_cond) %>%
+  filter(month == 12) %>%
+  group_by(solute) %>% 
+  dplyr::summarize(x = 12,
+            y = mean(SpC_per, na.rm = T))
+
+p_cont <- ggplot(data = df_cond,
+       aes(x = month,
+           y = SpC_per,
+           color = solute)) +
+  stat_summary() +
+  stat_summary(geom = "line") +
+  ggrepel::geom_text_repel(data = df_lab, 
+            aes(label = solute, x = x, y = y, color = solute), size = 2.5,
+            nudge_x = 1,)+ 
+  guides(color = "none") +
+  scale_color_viridis_d() +
+  theme_classic(base_size = 10) +
+  theme(plot.tag.position = c(0.15, 0.97)) +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  labs(x = "month", 
+       y = expression("contribution to "*C[25]~"(%)"))
+p_cont
+
+ggsave(plot = p_cont,
+       filename = file.path("results", "contribution_to_cond.png"),
+       width = 13.5,
+       height = 13.5,
+       units = "cm",
+       dpi = 300)
+
+# Plot ionic strength vs conductivity to get relationship
+p_i <- ggplot(data = df_cond,
+              aes(x = SpC_t_act,
+                  y = I)) +
+  geom_point() +
+  stat_smooth(method = "lm") +
+  ggpubr::stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = '~')),
+  ) +
+  theme_classic(base_size = 10) +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  labs(y = "Ionic strength", 
+       x = expression(C[25]~"("*mu*S~cm^{-1}*")"))
+p_i
 
 # This does a very good job at estimating measured SpC
-distinct(df_cond, SpC_m, SpC_t, SpC_t_act, date, site_no, temp) %>%
+p_cond <- distinct(df_cond, SpC_m, SpC_t, SpC_t_act, date, site_no, temp) %>%
   filter(site_no %in% c("4045900",
                         "4046800",
                         "4048000")) %>%
@@ -123,20 +175,38 @@ distinct(df_cond, SpC_m, SpC_t, SpC_t_act, date, site_no, temp) %>%
                                                     ..adj.rr.label.., 
                                                     sep = "~~~~"))) +
   theme_classic(base_size = 10) +
+  theme(plot.tag.position = c(0.18, 0.97)) +
   labs(x = expression(C[25]~from~charge~balance~"("*mu*S~cm^{-1}*")"),
        y = expression(measured~C[25]~"("*mu*S~cm^{-1}*")"))
-ggsave(filename = file.path("results", "measured_vs_estimated_SpC.png"),
+
+
+ggsave(plot = p_cond, filename = file.path("results", "measured_vs_estimated_SpC.png"),
        dpi = 300,
        units = "cm",
        width = 9.2,
        height = 9.2)
+
+p_cond_all <- p_cond + p_cont + plot_annotation(tag_levels = "a")
+ggsave(plot = p_cond_all, 
+       filename = file.path("results", "supplement_conductivity.png"),
+       dpi = 300,
+       units = "cm",
+       width = 18.4,
+       height = 9.2)
+
+# Look at relationship between ionic strength and SpC
+ggplot(data = df_cond,
+       aes(x = SpC_m,
+           y = I)) +
+  geom_point()
+coef(MASS::rlm(I~SpC_m + 0, data = df_cond))
 
 # Look at how much of SpC comes from Residual alkalinity and NO3
 df_res <- df_cond %>%
   filter(year > 1990) %>%
   mutate(
     # Amount of conductivity from ions in Residual Alkalinity, Alk',
-    # Groleau et al. 2015
+    # Groleau et al. 2000
     # Alk' = [Na+] + [K+] + 2[Mg+] - [Cl-] - 2[SO4--]
     # First get 1 or 0 for those ions
     Alk_res_ion = if_else(solute %in% c("Na", "K", "Mg", "Cl", "SO4"),
@@ -173,6 +243,7 @@ df_wq %>%
                         "4046800",
                         "4048000")) %>%
   filter(year > 1990, between(month, 4,9)) %>%
+  # select(Ca, HCO3) %>%
   select(Na, K, Mg, Cl, SO4) %>%
   # filter(solute %in% c("Na", "K", "Mg", "Cl", "SO4")) %>%
   summarize(across(where(is.numeric), ~sd(., na.rm = T)/mean(., na.rm = T)))
@@ -191,7 +262,30 @@ epsilon <- 110
 # Get calcium from conductivity -------------------------------------------
 # What is the relationship between Ca and Alkalinity
 # Assume alkalinity is dominated by HCO3
-df_wq %>%
+mod_df <- df_wq %>%
+  filter(site_no %in% c("4046000",
+                        # "4045900",
+                        "4046800",
+                        "4048000")) %>%
+  mutate(Ca = Ca / 40.078 * 1000,
+         HCO3 = HCO3 / 61.0168 * 1000) %>%
+  filter(between(Ca, 500, 1200),
+         between(HCO3, 1000, 2500))
+
+
+lm_eqn <- function(data){
+  m <- MASS::rlm(HCO3~Ca, data)
+  s <- summary(m)
+  m2 <- lm(HCO3~Ca, data)
+  eq <- substitute(italic(y) == a + b %+-%c*italic(x)*","~~italic(R)^2~"="~r2, 
+                   list(a = format(unname(coef(m)[1]), digits = 2),
+                        b = format(unname(coef(m)[2]), digits = 2),
+                        c = format(unname(coef(s)[2,2]), digits = 1),
+                        r2 = format(summary(m2)$r.squared, digits = 2)))
+  as.character(as.expression(eq));
+}
+
+p_hco3_ca_all <- df_wq %>%
   filter(site_no %in% c("4046000",
                         # "4045900",
                         "4046800",
@@ -199,20 +293,52 @@ df_wq %>%
   ggplot(aes(x = Ca / 40.078 * 1000,
            y = HCO3 / 61.0168 * 1000)) +
   geom_point() +
-  # facet_wrap(~site_no) + 
   scale_x_continuous(limits = c(500, 1200)) +
   scale_y_continuous(limits = c(1000, 2500)) +
-  stat_smooth(method = "lm") +
-  ggpubr::stat_regline_equation(aes(label =  paste(..eq.label.., 
-                                                   ..adj.rr.label.., 
-                                                   sep = "~~~~"))) +
+  stat_smooth(method=function(formula,data,weights=weight) MASS::rlm(formula,
+                                                                data,
+                                                                weights=weight,
+                                                                method="MM"),
+              fullrange=TRUE) +
+  annotate(geom = "text", x = 650, y = 2400, label = lm_eqn(mod_df), parse = TRUE) +
   theme_classic(base_size = 10) +
   labs(x = expression(Ca~"("*mu*M*")"),
        y = expression(HCO[3]^{`-`}~"("*mu*M*")"))
-ggsave(filename = file.path("results", "bicarb_vs_ca.png"),
+p_hco3_ca_all
+
+
+p_hco3_ca_sum <- df_wq %>%
+  filter(site_no %in% c("4046000",
+                        # "4045900",
+                        "4046800",
+                        "4048000"),
+         between(month, 6, 9)) %>%
+  ggplot(aes(x = Ca / 40.078 * 1000,
+             y = HCO3 / 61.0168 * 1000)) +
+  geom_point() +
+  # facet_wrap(~site_no) + 
+  scale_x_continuous(limits = c(500, 1200)) +
+  scale_y_continuous(limits = c(1000, 2500)) +
+  stat_smooth(method=function(formula,data,weights=weight) MASS::rlm(formula,
+                                                                     data,
+                                                                     weights=weight,
+                                                                     method="MM"),
+              fullrange=TRUE) +
+  annotate(geom = "text", x = 650, y = 2400, label = lm_eqn(filter(mod_df,
+                                                                   between(month, 6, 9))), 
+           parse = TRUE) +
+  theme_classic(base_size = 10) +
+  labs(x = expression(Ca~"("*mu*M*")"),
+       y = expression(HCO[3]^{`-`}~"("*mu*M*")"))
+p_hco3_ca_sum
+
+p_hca <- p_hco3_ca_all + p_hco3_ca_sum + plot_annotation(tag_levels = "a")
+p_hca
+ggsave(filename = file.path("results", "bicarb_vs_ca_rlm.png"),
+       plot = p_hca,
        dpi = 300,
        units = "cm",
-       width = 9.2,
+       width = 18,
        height = 9.2)
 
 # Forcing a 0 intercept, the slope is 2.1; [HCO3] = 2.1[Ca]
