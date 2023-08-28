@@ -1,4 +1,5 @@
 library(tidyverse)
+library(scales)
 library(patchwork)
 
 ?seacarb::carb
@@ -51,23 +52,28 @@ df <- tibble(co2 = co2) |>
 
 
 p1 <- ggplot(data = df,
-       aes(x = co2)) +
-  geom_line(aes(y = hco3), linewidth = 1.2) +
-  annotate(geom = "text", x = 0.01, y = 1.1, label = "HCO[3]^{`-`}", parse = TRUE) +
-  annotate(geom = "text", x = 0.008, y = 3E-2, label = "CO[3]^{`2-`}", parse = TRUE) +
-  geom_line(aes(y = co3), linetype = "dashed", linewidth = 1.2) + 
+       aes(x = co2 * 1000)) +
+  geom_line(aes(y = hco3 * 1000), linewidth = 1.2) +
+  annotate(geom = "text", x = 0.01 * 1000, y = 1.1 * 1000, label = "HCO[3]^{`-`}", parse = TRUE) +
+  annotate(geom = "text", x = 0.008 * 1000, y = 3E-2 * 1000, label = "CO[3]^{`2-`}", parse = TRUE) +
+  geom_line(aes(y = co3 * 1000), linetype = "dashed", linewidth = 1.2) + 
   scale_y_log10() +
-  scale_x_log10() +
+  scale_x_continuous(trans = c("log10", "reverse")) +
+  annotation_logticks(sides = "bl") +
+  geom_segment(aes(x = 0.03 * 1000, y = 0.007 * 1000, xend = 0.0009 * 1000, yend = 0.007 * 1000),
+               arrow = arrow(length = unit(0.5, "cm"))) +
+  annotate(geom = "text", x = 0.005 * 1000, y = 0.009 * 1000, label = "decreasing~CO[2]", parse = TRUE) +
+  annotate(geom = "text", x = 120, y = 1900, label = "a") +
   theme_classic() +
-  labs(x = expression(CO[2]~"("*mol~m^{-3}*")"),
-       y = expression("("*mol~m^{-3}*")"))
+  labs(x = expression(CO[2]~"("*mmol~m^{-3}*")"),
+       y = expression("("*mmol~m^{-3}*")"))
 p1
 
 ppH <- ggplot(data = df,
              aes(x = co2)) +
   geom_line(aes(y = pH), linewidth = 1.2, color = "red") +
   scale_y_continuous(position = "right") +
-  scale_x_log10() +
+  scale_x_continuous(trans = c("log10", "reverse")) +
   theme_classic() +
   theme(axis.text.y = element_text(color = "red"),
         axis.title.y = element_text(color = "red"),
@@ -79,19 +85,24 @@ ppH <- ggplot(data = df,
        y = "pH")
 ppH
 
-p1pH <- p1 + ppH + plot_layout(design = c(area(t = 1, l = 1, b = 5, r = 5),
+p1pH <- (p1 + ppH) + plot_layout(design = c(area(t = 1, l = 1, b = 5, r = 5),
                                           area(t = 1, l = 1, b = 5, r = 5)))
 p1pH
 
 p2 <- ggplot(data = df,
-       aes(x = co2)) +
-  geom_line(aes(y = dhco3_sc), linewidth = 1.2) +
-  annotate(geom = "text", x = 0.004, y = 5, label = "HCO[3]^{`-`}", parse = TRUE) +
-  annotate(geom = "text", x = 0.004, y = -6, label = "CO[3]^{`2-`}", parse = TRUE) +
-  annotate(geom = "text", x = 0.002, y = -1, label = "C[25]", parse = TRUE) +
-  geom_line(aes(y = dco3_sc), linetype = "dashed", linewidth = 1.2) +
-  geom_line(aes(y = dSC), linetype = "dotted", linewidth = 1.2) + 
-  scale_x_log10() +
+       aes(x = co2 * 1000)) +
+  geom_line(aes(y = -dhco3_sc), linewidth = 1.2) +
+  annotate(geom = "text", x = 0.001 * 1000, y = -6.3, label = "Delta*C[HCO[3]^{`-`}]", parse = TRUE) +
+  annotate(geom = "text", x = 0.003 * 1000, y = 5, label = "Delta*C[CO[3]^{`2-`}]", parse = TRUE) +
+  annotate(geom = "text", x = 0.002 * 1000, y = -0.2, label = "Delta*C[25]", parse = TRUE) +
+  geom_line(aes(y = -dco3_sc), linetype = "dashed", linewidth = 1.2) +
+  geom_line(aes(y = -dSC), linetype = "dotted", linewidth = 1.2) + 
+  scale_x_continuous(trans = c("log10", "reverse")) +
+  annotation_logticks(sides = "b") +
+  geom_segment(aes(x = 0.1 * 1000, y = -7.5, xend = 0.003 * 1000, yend = -7.5),
+               arrow = arrow(length = unit(0.5, "cm"))) +
+  annotate(geom = "text", x = 0.02 * 1000, y = -6.8, label = "decreasing~CO[2]", parse = TRUE) +
+  annotate(geom = "text", x = 95, y = 9.5, label = "b") +
   theme_classic() +
   labs(x = expression(CO[2]~"("*mol~m^{-3}*")"),
        y = expression(Delta*C[25]~"("*mu*S~cm^{-2}*")"))
@@ -99,11 +110,11 @@ p2
 p <- p1pH | p2
 p
 ggsave(plot = p,
-       filename = file.path("results", "cond_changes_co2_uptake_mol.png"),
+       filename = file.path("results", "figureS_cond_changes_co2_uptake_mmol.png"),
        dpi = 300,
        units = "cm",
        width = 18.4,
-       height = 12)
+       height = 9.2)
 
 pbeta <- ggplot(data = df,
              aes(x = co2)) +
@@ -196,6 +207,7 @@ p4 <- ggplot(data = df_hco3,
        y = expression(Delta*C[25]~"("*mu*S~cm^{-2}*")"))
 p4
 p5 <- p3 | p4
+p5
 ggsave(plot = p,
        filename = file.path("results", "cond_changes_co2_uptake.png"),
        dpi = 300,

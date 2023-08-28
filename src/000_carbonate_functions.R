@@ -91,12 +91,14 @@ DIC <- function(TK, AT, pH, cond) {
   CO2 <- (CT * (H^2) * 10^ (6*gamma)) / ((H^2 * 10^(6*gamma)) + 
                                            (K1 * H * 10^(4*gamma))+ (K1 * K2))
 
-  #Uses Henry's Law constant and converts from atm to uatm (KH in fugacity (mol-atm / kg-
-  #soln))
+  #Uses Henry's Law constant and converts from atm to uatm 
+  #(KH in fugacity (mol-atm / kg-soln))
   pCO2 <- (CO2 / KH) * 1000000
-  #Uses the apparent Henry's Law constant and converts from atm to uatm (KHa in fugacity
-  #(mol-atm / kg-soln))
+  
+  #Uses the apparent Henry's Law constant
   pCO2_correction <- (CO2 / KHa) * 1000000
+  
+  # Result as dataframe of carbonate species
   data.frame(CO2_uM = CO2_uM, pCO2_uatm = pCO2, pCO2_cor_uatm = pCO2_correction, 
              DIC_uM = DIC_uM, HCO3_uM = HCO3_uM, CO3_uM = CO3_uM)
 }

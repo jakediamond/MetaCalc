@@ -105,19 +105,6 @@ clean_fun <- function(data,
                                                              narun$lengths)}) %>%
     dplyr::mutate(namax = length(is.na(DO_mgL))) %>%
     dplyr::mutate(DO = if_else((is.na(DO_mgL) & namax > 12), NA_real_, DO))
-  
-  # Finally fill the NA where possible
-  # data_final <- data_nalengths %>%
-  # group_by(year) %>%
-  # filter.(!(sum(is.na(DO_mgL)) > 180 * 24)) %>%
-  # ungroup()# %>%
-  # mutate(DO_use = na_kalman(DO, maxgap = 12))
-  
-  # Fill in NAs as best as possible with kalman filtering
-  # do_ts <- ts(data_final$DO_use, frequency = 24)
-  # do_ts_clean <- imputeTS::na_seasplit(do_ts, algorithm = "kalman")
-  # data_final$DO_use <- as.numeric(do_ts_clean)
-  # data_final
 }
 
 # Define lowpass filter function
@@ -147,6 +134,4 @@ lowpass_fun <- function(data, variable,
   # Filtered data
   data$filtered <- filtered
   data <- data[with(data, order(datetime)), ]
-  # rem <- sr / cutoff
-  # data <- data[-c(1:rem, (nrow(data) - rem):nrow(data)),]
 }

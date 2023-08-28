@@ -14,18 +14,8 @@ source(file.path("src", "000_error_propagation_function.R"))
 
 # Load data and clean---------------------------------------------------------------
 # Load metabolism data
-list.files(path = file.path("data", "02_metabolism", "newest_metabolism"),
-           pattern = "GetFitDaily",
-           full.names = TRUE) %>%
-  map_dfr(read_csv, show_col_types = FALSE, id = "filename")
-
-# Clean just a bit for site and position
-df_met <- df_met %>%
-  mutate(name = gsub(".*GetFitDaily_","", filename),
-         name = gsub(".csv", "", name),
-         site = strsplit(name, "_")[[1]][1],
-         pos = strsplit(name, "_")[[1]][2],
-         period = strsplit(name, "_")[[1]][3])
+df_met <- readRDS(file.path("data", "02_metabolism", 
+                            "update_metabolism_results_07dec2022.RDS"))
 
 # get site and position info
 df_met <- df_met %>%
@@ -35,10 +25,25 @@ df_met <- df_met %>%
   separate(col = source, into = c("type", "site", "pos", "period"), sep = "_") %>%
   select(-type)
 
+# list.files(path = file.path("data", "02_metabolism", "newest_metabolism"), 
+#                  pattern = "GetFitDaily",
+#                  full.names = TRUE) %>% 
+#   map_dfr(read_csv, show_col_types = FALSE, id = "filename")
+# 
+# # Clean just a bit for site and position 
+# df_met <- df_met %>%
+#   mutate(name = gsub(".*GetFitDaily_","", filename),
+#          name = gsub(".csv", "", name),
+#          site = strsplit(name, "_")[[1]][1],
+#          pos = strsplit(name, "_")[[1]][2],
+#          period = strsplit(name, "_")[[1]][3])
+# 
+# saveRDS(df_met2, file.path("data", "02_metabolism", "newest_metabolism.RDS"))
 
 # Load discharge, and K600 from Raymond equations data
 df_kray <- readxl::read_xlsx(file.path("data", "03_CO2", 
                                        "DAM_K600_Flux_all_Eq.xlsx"))
+                                      # "DAM_K600_Raymond_eq.xlsx"))
 
 # Load pCO2 data from CO2SYS with uncertainty
 df_co2sys <- readxl::read_xlsx(file.path("data", "03_CO2", 
@@ -144,18 +149,46 @@ df_KCO2_met <- select(df_met_clean, date, contains("K600_mean"), K600_2.5, K600_
 # Now we want to calculate CO2 fluxes with the two different K's
 df_CO2 <- left_join(df_KCO2_met, df_KCO2_ray) %>%
   left_join(select(df_kray, date, depth = `Depth (m)`)) %>%
-  left_join(df_co2sys) %>%
+  left_join(df_co2sys) %>%#select(df_co2sys, CO2_w = `CO2 (mmol/m3)`, 
+             #      CO2_a = `CO2_atm (mmol/m3)`, date)) %>%
+  # mutate(dCO2_atm = 0, ddepth = 0) %>% #no uncertainty in atm [CO2] and depth
+  # mutate_with_error(CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean) %>%
+  # mutate_with_error(CO2_met_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean) %>%
+  # left_join(select(b, date, CO2_flux = CO2_met_mean, dCO2_flux = sd)) %>%
   tidytable::mutate(CO2_flux = depth * (CO2_mmolm3 - CO2_atm) * KCO2_met_mean,
                     co2_dist = tidytable::map2(CO2_mmolm3, dCO2_mmolm3, ~rnorm(10000, .x, .y)),
                     k_dist = tidytable::map2(K600_met_2.5, K600_met_97.5, 
                                              ~sample(c(runif(100, .x, .y),
                                                        runif(100, .x, .y)),
                                                      10000, replace = TRUE)),
+                    # k_dist = map2(KCO2_met_mean, dKCO2_met_mean, ~rnorm(1000, .x, .y)),
                     f_dist = tidytable::map2(co2_dist, k_dist, ~depth * (.x - CO2_atm) * .y),
+                    # f_mean_mcmc = map_dbl(f_dist, mean, na.rm = T),
                     dCO2_flux = tidytable::map_dbl(f_dist, sd, na.rm = T) / sqrt(10000),
                     CO2_flux_2.5 = tidytable::map_dbl(f_dist, quantile, 0.025, na.rm = T),
                     CO2_flux_97.5 = tidytable::map_dbl(f_dist, quantile, 0.975, na.rm = T)) %>%
-  select(-KCO2_ray_mean, -dKCO2_ray_mean, -co2_dist, -k_dist, -f_dist)
+  select(-KCO2_ray_mean, -dKCO2_ray_mean, -co2_dist, -k_dist, -f_dist) #%>%
+  # mutate(#CO2_ray_2.5 = CO2_ray_mean - 1.96*dCO2_ray_mean, 
+  #        #CO2_ray_97.5 = CO2_ray_mean + 1.96*dCO2_ray_mean,
+  #        CO2_2.5 = CO2_flux - 1.96*dCO2_flux, # estimate 95% credible interval for CO2 fluxes
+  #        CO2_97.5 = CO2_flux + 1.96*dCO2_flux)
+
+# a <- df_CO2 %>%
+#   mutate(co2_dist = map2(CO2_mmolm3, dCO2_mmolm3, ~rnorm(1000, .x, .y)),
+#          k_dist = map2(KCO2_met_mean, dKCO2_met_mean, ~rnorm(1000, .x, .y)),
+#          f_dist = map2(co2_dist, k_dist, ~depth * (.x - CO2_atm) * .y),
+#          f_mean_mcmc = map_dbl(f_dist, mean, na.rm = T),
+#          f_sd_mcmc = map_dbl(f_dist, sd, na.rm = T))
+# 
+# b <- select(a, -co2_dist, -k_dist, -f_dist) %>%
+#   mutate(sd = f_sd_mcmc / sqrt(1000))
+# saveRDS(df_CO2, "mcmc_CO2_v2_confidenceintervalK.RDS")
+# a <- readRDS("mcmc_CO2.RDS")
+# b <- select(a, -co2_dist, -k_dist) %>%
+#   mutate(se = f_sd_mcmc / sqrt(1000),
+#          twofive = map_dbl(f_dist, quantile, 0.025, na.rm = T),
+#          nine = map_dbl(f_dist, quantile, 0.975, na.rm = T)) %>%
+#   select(-f_dist)
 # Save all data for future reference --------------------------------------
 df_save <- df_CO2 %>%
   select(-contains("ray")) %>%
@@ -172,3 +205,62 @@ write_excel_csv(df_save, file = file.path("data", "03_CO2",
                                                  dt,
                                                  ".csv")))
 
+
+# Old ---------------------------------------------------------------------
+# p <- ggplot(data = df_p_met, aes(x = date)) +
+#   geom_line(aes(y = mean,
+#                 color = type)) +
+#   geom_hline(yintercept = 0) +
+#   geom_ribbon(aes(ymin = `2.5`, ymax = `97.5`, fill = type), alpha = 0.7) +
+#   theme_bw() +
+#   scale_color_manual(name = "flux", values = c("dark green", "black")) +
+#   scale_fill_manual(name = "flux", values = c("dark green", "black")) +
+#   labs(x = "", y = "metabolism (g O2/m2/d)") +
+#   theme(axis.title.x = element_blank(),
+#         legend.position = "none")
+# 
+# ggplotly(p)
+# 
+# p_smooth <- ggplot(data = df_p_met_smooth, aes(x = date)) +
+#   geom_line(aes(y = mean,
+#                 color = type)) +
+#   geom_hline(yintercept = 0) +
+#   geom_ribbon(aes(ymin = `2.5`, ymax = `97.5`, fill = type), alpha = 0.7) +
+#   theme_bw() +
+#   scale_color_manual(name = "flux", values = c("dark green", "black")) +
+#   scale_fill_manual(name = "flux", values = c("dark green", "black")) +
+#   labs(x = "", y = "metabolism (g O2/m2/d)") +
+#   theme(axis.title.x = element_blank(),
+#         legend.position = "none")
+# 
+# ggplotly(p_smooth)
+# 
+# htmltools::browsable(htmltools::tagList(ggplotly(p_smooth)))
+
+# 
+# 
+# df_use <- df_cq %>% 
+#   left_join(select(df_met_err, date, NEP_mean, dNEP_mean, GPP_mean, dGPP_mean, 
+#                    ER_mean, dER_mean, K600_mean, dK600_mean) %>%
+#               mutate(across(where(is.numeric), ~.*-1000/32))) %>% #get NEP from atmosphere perspective in mmol
+#   mutate_with_error(ray_mean ~ NEP_mean / CO2_ray_mean) %>%
+#   mutate_with_error(met_mean ~ NEP_mean / CO2_met_mean)
+# 
+# f = flux~CO2_ray_mean ~ depth * (CO2_mmolm3 - CO2_atm) * KCO2_ray_mean
+# exprs = list(
+#   # expression to compute new variable values
+#   deparse(f[[3]]),
+#   # expression to compute new variable errors
+#   sapply(all.vars(f[[3]]), function(v) {
+#     dfdp = deparse(D(f[[3]], v))
+#     sprintf('(d%s*(%s))^2', v, dfdp)
+#   }) %>%
+#     paste(collapse='+') %>%
+#     sprintf('sqrt(%s)', .)
+# )
+# names(exprs) = c(
+#   deparse(f[[2]]),
+#   sprintf('d%s', deparse(f[[2]]))
+# )
+# exprs[[2]]
+# sqrt(0.89^2*(54.3-20.60)^2*0.4^2 + 0.89^2*0.92^2*16.8^2)
