@@ -24,3 +24,18 @@ mutate_with_error = function(.data, f) {
     # the standard evaluation alternative of mutate()
     mutate_(.dots=exprs)
 }
+
+
+# function for standard error of the mean for magnitude-weighted msmts
+se_magwt <- function (x, w) {
+  # The effective number of measurements
+  neff <- sum(w)^2 / sum(w^2)
+  
+  # The weighted variance
+  varwt <- (sum(w * (x - mean(x))^2)) * (neff / (neff - 1)) / sum(w)
+  
+  # The unbiased standard error
+  sewt <- sqrt(varwt / neff)
+  
+  return(sewt)
+}

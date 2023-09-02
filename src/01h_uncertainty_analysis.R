@@ -1,55 +1,64 @@
 # 
-# Purpose: Analyze errors associated with mean estimates for CO2 and metabolism
+# Purpose: Analyze errors associated with mean estimates for FCO2 and metabolism
 # Author: Jake Diamond
 # Date: 27 January 2023
 # 
 
 # Load libraries
-library(plotly)
-library(lubridate)
 library(tidyverse)
 
-# Load error propagation function
+# Load uncertainty propagation code
 source(file.path("src", "000_error_propagation_function.R"))
-source(file.path("src", "000_lowpass_function.R"))
 
 # Load data ---------------------------------------------------------------
-df <- readRDS(file = file.path("data", "03_CO2",
-                                    "CO2_with_uncertainty_dampierre_up_2023-02-21.RDS")) 
-
-# Load discharge, and K600 from Raymond equations data
-df_q <- readxl::read_xlsx(file.path("data", "03_CO2", 
-                                       "DAM_K600_Flux_all_Eq.xlsx")) |>
-  select(date, Discharge)
+df <- readRDS(file.path("data", "hourly_data.RDS")) 
+x <- select(df, GPP_mean, ER_mean, dGPP_mean, dER_mean)
+y <- select(df, date, datetime, CO2_uM, dCO2_uM, KCO2_mean, dKCO2_mean, depth_m, 
+            CO2eq_uM, K600_mean, dK600_mean, dSc_CO2_mean,
+            FCO2, dFCO2) |>
+  mutate(ddepth_m = 0, dCO2eq_uM = 0) |>
+  mutate_with_error(fco2 ~ depth_m * KCO2_mean * (CO2_uM - CO2eq_uM))
 
 # Clean data --------------------------------------------------------------
-# df_clean <- df |>
-#   mutate(GPP_2.5 = if_else(GPP_mean == 0, 0, GPP_2.5), #no uncertainty if GPP < 0
-#          GPP_97.5 = if_else(GPP_mean == 0, 0, GPP_97.5),
-#          ER_2.5 = if_else(ER_mean == 0, 0, ER_2.5), #or if ER > 0
-#          ER_97.5 = if_else(ER_mean == 0, 0, ER_97.5)) |>
+# Don't want to inflate uncertainty for GPP/ER for days without data
+df <- df |>
+  mutate(dGPP_mean = if_else(GPP_mean == 0, 0, dGPP_mean), #no uncertainty if GPP < 0
+         dER_mean = if_else(ER_mean == 0, 0, dER_mean)) #or if ER > 0
+
+# Get daily data for simplicity
+df_d <- df |>
+  select(date, datetime, FCO2, dFCO2, CO2_uM, dCO2_uM) |>
+  mutate(FCO2_hr = FCO2 /24,
+         dFCO2_hr = dFCO2 / 24 * sqrt(10000)) |>
+  group_by(date) |>
+  summarize(fCO2 = sum(FCO2_hr, na.rm = T),
+            # was se not sd from monte carlo, multiply by sqrt(n)
+            dfCO2 = sqrt(sum(dFCO2_hr^2)),
+            # dfCO2 = se_magwt(FCO2, FCO2),
+            CO2 = mean(CO2_uM),
+            dCO2 = sqrt(sum(dCO2_uM^2))) |>
+  left_join(distinct(df, date, K600 = K600_mean, dK600 = dK600_mean,
+                     GPP = GPP_mean, dGPP = dGPP_mean,
+                     ER = ER_mean, dER = dER_mean,
+                     NEP = NEP_mean, dNEP = dNEP_mean))
 
 
+z <- filter(y, date == ymd(19900101)) |>
+  mutate(FCO2_hr = FCO2 /24,
+         dFCO2_hr = dFCO2 / 24 * sqrt(10000))
+sqrt(sum(z$dFCO2_hr^2))
 # Look at uncertainty distributions ----------------------------------------
 # First get into nice format for only variables of concern
-df_cv <- df |>
-  mutate(ER_mean = abs(ER_mean),
-         dCO2_flux = dCO2_flux*sqrt(1000)) |>
-  # mutate_with_error(PR_mean ~ GPP_mean/ER_mean) |>
-  select(date, contains(c("mean", "d")), pCO2_ppmv, CO2_mmolm3, CO2_flux_mean = CO2_flux,
-         -depth, -dSc_CO2_mean, -Sc_CO2_mean) |>
+df_cv <- df_d |>
+  mutate(ER = abs(ER),
+         fCO2 = abs(fCO2)) |> # was se not sd from monte carlo
   pivot_longer(cols = -date) |>
   mutate(type = if_else(str_detect(name, "d"), "sd", "mean"),
          name2 = str_remove(name, "_mean"),
          name3 = str_extract(name2, "(?<=d).*")) |>
   mutate(name4 = if_else(is.na(name3), name2, name3)) |>
   select(date, name = name4, type, value) |>
-  pivot_wider(names_from = type, values_from = value) |>
-  mutate(name = case_match(name,
-                           "K600_met" ~ "K600",
-                           "CO2_flux" ~ "fCO2",
-                           "pCO2_ppmv" ~ "pCO2",
-                           .default = name))
+  pivot_wider(names_from = type, values_from = value)
 
 # calculate cv for each day (sd/mean)
 df_cv <- df_cv |>
@@ -57,8 +66,7 @@ df_cv <- df_cv |>
 
 # get summary of that data
 cv_summary <- df_cv |> 
-  filter(!is.infinite(cv),
-         !(name %in% c("CO2_mmolm3", "KCO2_ray", "KCO2_met", "PR"))) |>
+  filter(!is.infinite(cv)) |>
   drop_na() |>
   group_by(name) |>
   summarize(median = round(median(cv), 2),
@@ -68,18 +76,18 @@ cv_summary <- df_cv |>
 
 # Plot distributions of cv for each
 df_cv |>
-  filter(!is.infinite(cv),
-         !(name %in% c("CO2_mmolm3", "KCO2_ray", "KCO2_met", "PR"))) |>
+  filter(!is.infinite(cv)) |>
   drop_na() |>
   ggplot(aes(x = cv, group = name)) +
   geom_histogram() +
   theme_classic() + 
   geom_vline(data = cv_summary,
-             aes(xintercept = median), color = "red", size = 1.25) +
-  geom_text(data = cv_summary, aes(label = lab), x = 1.2, y = 7500) +
+             aes(xintercept = median), color = "red", linewidth = 1.1) +
+  geom_text(data = cv_summary, aes(label = lab), x = 1.2, y = 3500) +
   facet_wrap(~name) +
   scale_x_continuous(limits = c(0, 2)) +
   labs(x = "daily coefficient of variation (SD/mean)")
+
 ggsave(filename = file.path("results", "uncertainty", "cv_distributions.png"),
        dpi = 300,
        units = "cm",
@@ -88,6 +96,7 @@ ggsave(filename = file.path("results", "uncertainty", "cv_distributions.png"),
 # Calculate central tendency with different measures ----------------------
 df_cent <- df_cv |>
   mutate(wt = 1 / sd^2) |>
+  drop_na() |>
   group_by(name) |>
   summarize(mn = mean(mean, na.rm = T),
             med = median(mean, na.rm = T),
