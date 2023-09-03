@@ -11,10 +11,10 @@ library(patchwork)
 
 # Model the carbonate system of the Loire under varying CO2 conditions
 # High CO2 for pH 7.5 and Alk 1.7 = 9.989661e-05
-# Low CO2 for pH 9.7 and ALK 1.7 = 3.288592e-07
+# Low CO2 for pH 10 and ALK 1.7 = 3.288592e-07
 # Make a log sequence of increasing CO2 concentrations
-co2 <-  3.288592e-07 * 2^(0:log((9.989661e-05/3.288592e-07), 2))
-
+# co2 <-  3.288592e-07 * 2^(0:log((9.989661e-05/3.288592e-07), 2))
+co2 <-  1.5e-07 * 2^(0:log((800e-06/1.5e-07), 2))
 # activity coeff
 ac_hco3 <- 0.93
 ac_co3 <- 0.93^4
@@ -102,6 +102,7 @@ p2 <- ggplot(data = df,
   annotate(geom = "text", x = 0.002 * 1000, y = -0.2, label = "Delta*C[25]", parse = TRUE) +
   geom_line(aes(y = -dco3_sc), linetype = "dashed", linewidth = 1.2) +
   geom_line(aes(y = -dSC), linetype = "dotted", linewidth = 1.2) + 
+  geom_hline(yintercept = 0) +
   scale_x_continuous(trans = c("log10", "reverse")) +
   annotation_logticks(sides = "b") +
   geom_segment(aes(x = 0.1 * 1000, y = -7.5, xend = 0.003 * 1000, yend = -7.5),
@@ -112,16 +113,37 @@ p2 <- ggplot(data = df,
   labs(x = expression(CO[2]~"("*mmol~m^{-3}*")"),
        y = expression(Delta*C[25]~"("*mu*S~cm^{-2}*")"))
 p2
+
+# Plot of just the conductivity
+p3 <- ggplot(data = df,
+             aes(x = co2 * 1000)) +
+  geom_line(aes(y = hco3_sc), linewidth = 1.2) +
+  annotate(geom = "text", x = 1, y = 60, label = "C[HCO[3]^{`-`}]", parse = TRUE) +
+  annotate(geom = "text", x = 3, y = 5, label = "C[CO[3]^{`2-`}]", parse = TRUE) +
+  annotate(geom = "text", x = 10, y = 76, label = "C[HCO[3]^{`-`}]+C[CO[3]^{`2-`}]", parse = TRUE) +
+  geom_line(aes(y = co3_sc), linetype = "dashed", linewidth = 1.2) +
+  geom_line(aes(y = SC), linetype = "dotted", linewidth = 1.2) + 
+  scale_x_continuous(trans = c("log10", "reverse")) +
+  annotation_logticks(sides = "b") +
+  geom_segment(aes(x = 600, y = 10, xend = 10, yend = 10),
+  arrow = arrow(length = unit(0.5, "cm"))) +
+  annotate(geom = "text", x = 70, y = 14, label = "decreasing~CO[2]", parse = TRUE) +
+  annotate(geom = "text", x = 600, y = 80, label = "b") +
+  theme_classic() +
+  labs(x = expression(CO[2]~"("*mmol~m^{-3}*")"),
+       y = expression(contribution~to~C[25]~"("*mu*S~cm^{-2}*")"))
+p3
+
 # Overall combined plot
-p <- p1pH | p2
+p <- (p1pH | p3) / p2
 p
 
 ggsave(plot = p,
-       filename = file.path("results", "figureS_cond_changes_co2_uptake_mmol.png"),
+       filename = file.path("results", "figureS_cond_changes_co2_uptake_mmol_v2.png"),
        dpi = 300,
        units = "cm",
        width = 18.4,
-       height = 9.2)
+       height = 12.2)
 
 pbeta <- ggplot(data = df,
              aes(x = co2)) +

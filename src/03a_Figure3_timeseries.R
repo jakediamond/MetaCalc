@@ -8,21 +8,30 @@ library(patchwork)
 library(tidyverse)
 
 # Load data ---------------------------------------------------------------
-df <- readRDS(file.path("data", "hourly_data_final.RDS"))
+df <- readRDS(file.path("data", "hourly_data.RDS"))
+df_tf <- readRDS(file.path("data", "daily_trophlux.RDS"))
 
 # Get hourly averages of everything 
 df_avg <- df |>
-  mutate(calc_mMm2hr = if_else(SI < 0 & calc_mMm2hr > 0, 0, calc_mMm2hr),
-         calc_mMm2hr = if_else(SI > 0 & calc_mMm2hr < 0, 0, calc_mMm2hr)) |>
+  mutate(exCO2 = CO2_uM - CO2eq_uM,
+         calc_mMm2hr = -0.5 * (AT_mM - lag(AT_mM)) * depth_m * 1000) |>
+  mutate(
+    calc_mMm2hr = if_else(SI < 0.4 & calc_mMm2hr > 0, 0, calc_mMm2hr),
+    # calcification shouldn't be positive if SI is < 0
+    calc_mMm2hr = if_else(SI < 0 & calc_mMm2hr > 0, 0, calc_mMm2hr),
+    # And the inverse
+    calc_mMm2hr = if_else(SI > 0 & calc_mMm2hr < 0, 0, calc_mMm2hr)
+  ) |>
+  left_join(select(df_tf, date, troph, sourcesink, trophlux)) |>
   pivot_longer(cols = -c(year, month, troph, sourcesink, trophlux, date, 
-                         datetime, hr, depth, discharge)) |>
+                         datetime, hr, depth_m, Q_m3s)) |>
   group_by(trophlux, name, hr) |>
   summarize(mean_val = mean(value, na.rm = T),
             se_val = sd(value, na.rm = T) / sqrt(n()) * 1.96) |>
   ungroup() |>
   mutate(trophlux = str_replace(trophlux, "_", " "))
 
-x <- filter(df, trophlux == "autotrophic_source", exCO2 < 0)
+# x <- filter(df, trophlux == "autotrophic_source", exCO2 < 0)
 # Overall plot theme ------------------------------------------------------
 th <- list(geom_line(aes(y = mean_val,
                          color = trophlux)),
@@ -171,7 +180,7 @@ ptot <- (p_meas | p_carb | p_flux) + plot_annotation(tag_levels = "a") +
         plot.tag.position = c(0.27, 0.95))
 # ptot
 ggsave(plot = ptot,
-       filename = file.path("results", "figure3_timeseries.png"),
+       filename = file.path("results", "figure3_timeseries_v2.png"),
        dpi = 300,
        units = "cm",
        width = 18.4,

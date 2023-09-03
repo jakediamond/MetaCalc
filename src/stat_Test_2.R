@@ -1,9 +1,29 @@
-df <- readRDS(file.path("data", "hourly_data_final.RDS"))
-df_nepco2 <- readRDS(file.path("data", "03_CO2", "NEP_CO2_archetype.RDS"))
+df <- readRDS(file.path("data", "hourly_data.RDS"))
 
 df |>
-  summarize(sum(FCO2 < 0, na.rm = T) / n(),
-            sum(NEP > 0, na.rm = T) / n()) 
+  summarize(sum((CO2_uM - CO2eq_uM) < 0, na.rm = T) / n(),
+            sum(exO2 > 0, na.rm = T) / n()) 
+
+# Median CO2
+df |>
+  summarize(co2 = median(CO2_uM, na.rm = T),
+            pco2 = median(pCO2_uatm, na.rm = T))
+
+df <- readRDS(file.path("data", "daily_trophlux.RDS"))
+
+df |>
+  rename(FCO2 = filtered_FCO2_mean, NEP = filtered_NEP_mean) |>
+  # drop_na(FCO2, NEP) |>
+  filter(FCO2 > 0, NEP < 0) |>
+  mutate(rat = -NEP / FCO2 * 100) |>
+  summarize(mean_nep = mean(NEP, na.rm = T),
+            med_nep = median(NEP, na.rm = T),
+            mean_rat = mean(rat, na.rm = T),
+            # wt_rat = weighted.mean(rat, )
+            q_rat = quantile(rat, na.rm = T))
+
+
+
 
 df |>
   drop_na(FCO2) |>

@@ -12,12 +12,6 @@ source(file.path("src", "000_error_propagation_function.R"))
 
 # Load data ---------------------------------------------------------------
 df <- readRDS(file.path("data", "hourly_data.RDS")) 
-x <- select(df, GPP_mean, ER_mean, dGPP_mean, dER_mean)
-y <- select(df, date, datetime, CO2_uM, dCO2_uM, KCO2_mean, dKCO2_mean, depth_m, 
-            CO2eq_uM, K600_mean, dK600_mean, dSc_CO2_mean,
-            FCO2, dFCO2) |>
-  mutate(ddepth_m = 0, dCO2eq_uM = 0) |>
-  mutate_with_error(fco2 ~ depth_m * KCO2_mean * (CO2_uM - CO2eq_uM))
 
 # Clean data --------------------------------------------------------------
 # Don't want to inflate uncertainty for GPP/ER for days without data
@@ -31,34 +25,34 @@ df_d <- df |>
   mutate(FCO2_hr = FCO2 /24,
          dFCO2_hr = dFCO2 / 24 * sqrt(10000)) |>
   group_by(date) |>
-  summarize(fCO2 = sum(FCO2_hr, na.rm = T),
+  summarize(FCO2 = sum(FCO2_hr, na.rm = T),
             # was se not sd from monte carlo, multiply by sqrt(n)
-            dfCO2 = sqrt(sum(dFCO2_hr^2)),
+            dFCO2 = sqrt(sum(dFCO2_hr^2)),
             # dfCO2 = se_magwt(FCO2, FCO2),
             CO2 = mean(CO2_uM),
             dCO2 = sqrt(sum(dCO2_uM^2))) |>
-  left_join(distinct(df, date, K600 = K600_mean, dK600 = dK600_mean,
+  left_join(distinct(df, date, depth_m, K600 = K600_mean, dK600 = dK600_mean,
                      GPP = GPP_mean, dGPP = dGPP_mean,
                      ER = ER_mean, dER = dER_mean,
-                     NEP = NEP_mean, dNEP = dNEP_mean))
+                     NEP = NEP_mean, dNEP = dNEP_mean)) |>
+  left_join(group_by(df, date) |> summarize(KCO2 = mean(KCO2_mean), dKCO2 = mean(dKCO2_mean)) |>
+              distinct(date, .keep_all = TRUE)) |>
+  mutate(kco2 = KCO2 * depth_m, dkco2 = dKCO2 * depth_m) |>
+  mutate_with_error(nepco2 ~ -NEP / FCO2) |>
+  select(-depth_m, -KCO2, -dKCO2)
 
-
-z <- filter(y, date == ymd(19900101)) |>
-  mutate(FCO2_hr = FCO2 /24,
-         dFCO2_hr = dFCO2 / 24 * sqrt(10000))
-sqrt(sum(z$dFCO2_hr^2))
 # Look at uncertainty distributions ----------------------------------------
 # First get into nice format for only variables of concern
 df_cv <- df_d |>
   mutate(ER = abs(ER),
-         fCO2 = abs(fCO2)) |> # was se not sd from monte carlo
+         FCO2 = abs(FCO2)) |> # was se not sd from monte carlo
   pivot_longer(cols = -date) |>
   mutate(type = if_else(str_detect(name, "d"), "sd", "mean"),
          name2 = str_remove(name, "_mean"),
          name3 = str_extract(name2, "(?<=d).*")) |>
   mutate(name4 = if_else(is.na(name3), name2, name3)) |>
   select(date, name = name4, type, value) |>
-  pivot_wider(names_from = type, values_from = value)
+  pivot_wider(names_from = type, values_from = value, values_fn = mean)
 
 # calculate cv for each day (sd/mean)
 df_cv <- df_cv |>
@@ -95,13 +89,16 @@ ggsave(filename = file.path("results", "uncertainty", "cv_distributions.png"),
        width = 18.4)
 # Calculate central tendency with different measures ----------------------
 df_cent <- df_cv |>
-  mutate(wt = 1 / sd^2) |>
+  left_join(select(df_d, date, kco2) |> distinct(date, .keep_all = T)) |>
+  mutate(wt = 1 / sd^2,
+         wt2 = kco2) |>
   drop_na() |>
   group_by(name) |>
   summarize(mn = mean(mean, na.rm = T),
             med = median(mean, na.rm = T),
             wtdmn = weighted.mean(mean, wt, na.rm = T),
-            wtdmed = Hmisc::wtd.quantile(mean, wt, probs = 0.5, normwt = T))
+            wtmn = weighted.mean(mean, wt2, na.rm = T))
+            # wtdmed = Hmisc::wtd.quantile(mean, wt, probs = 0.5, normwt = T))
 
 # Estimate how often NEP or fCO2 were not different than 0 ----------------
 # distributions of the variables based on sampling 1000 times

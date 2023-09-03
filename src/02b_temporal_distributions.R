@@ -9,21 +9,21 @@ library(tidyverse)
 
 # Load data ---------------------------------------------------------------
 # Load daily NEP:CO2 archetypes
-df_nepco2 <- readRDS(file.path("data", "03_CO2", "NEP_CO2_archetype.RDS")) |>
-  mutate(wyear = ifelse(month > 9, year + 1, year))
+df <- readRDS(file.path("data", "hourly_data.RDS")) |>
+  mutate(wyear = ifelse(month > 8, year + 1, year))
 
 # flux by discharge ---------------------------------------------------
 # Percent of fco2 occuring greater than mean
-df_nepco2 |>
+df |>
   # column for if the discharge is above or below mean
-  mutate(more_less = if_else(Q > mean(Q, na.rm = T), "more", "less")) |>
+  mutate(more_less = if_else(Q_m3s > mean(Q_m3s, na.rm = T), "more", "less")) |>
   group_by(wyear, more_less) |>
   arrange(wyear, more_less) |>
   # Cumulative annual sum of FCO2 if Q is less/more than mean
-  mutate(cusum_lessmean = cumsum(filtered_CO2_meanenh)) |>
+  mutate(cusum_lessmean = cumsum(FCO2_enh)) |>
   ungroup() |>
   group_by(wyear) |>
-  mutate(totflux = sum(filtered_CO2_meanenh, na.rm = T)) |>
+  mutate(totflux = sum(FCO2_enh, na.rm = T)) |>
   group_by(wyear, more_less) |>
   # Get the total FCO2 if less or more than Q mean
   filter(cusum_lessmean == max(cusum_lessmean)) |>
@@ -37,14 +37,14 @@ df_nepco2 |>
             sd = sd(prop))
 
 # Proportion of total annual +FCO2 and Q (by water year)
-df_prop <- mutate(df_nepco2, 
-                  CO2 = if_else(filtered_CO2_meanenh < 0,
+df_prop <- mutate(df, 
+                  CO2 = if_else(FCO2_enh < 0,
                                 0,
-                                filtered_CO2_meanenh)) |>
+                                FCO2_enh)) |>
   group_by(wyear) |>
   arrange(wyear, date) |>
-  drop_na(Q) |>
-  mutate(Qsum = cumsum(Q),
+  drop_na(Q_m3s) |>
+  mutate(Qsum = cumsum(Q_m3s),
          CO2sum = cumsum(CO2)) |>
   mutate(Qfrac = Qsum / max(Qsum),
          CO2frac = CO2sum / max(CO2sum))

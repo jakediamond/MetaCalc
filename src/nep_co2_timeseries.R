@@ -4,7 +4,7 @@ p_ts <- plot_ly(data = df_clean,
                 x=~date) %>%
   add_trace(y= ~ -filtered_NEP_mean, type = "scatter", mode='lines', 
             color = I("#1E88E5"), showlegend = FALSE) %>%
-  add_trace(y= ~ filtered_CO2_meanenh, type = "scatter", mode='lines', 
+  add_trace(y= ~ filtered_FCO2_mean, type = "scatter", mode='lines', 
             color = I("#FFC107"), showlegend = FALSE) %>%
   layout(yaxis2 = list(overlaying = "y", side = "right",
                        title = TeX("\\text{pH}")),
