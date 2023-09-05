@@ -6,7 +6,7 @@
 # Load libraries
 library(patchwork)
 library(tidyverse)
-library(tidytable)
+# library(tidytable)
 
 # Load data ---------------------------------------------------------------
 df <- readRDS(file.path("data", "hourly_data.RDS"))

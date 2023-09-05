@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+MetaCalc_uncertainty_and_interactive_plots.Rmd
+data/
+doc/
+results/
+src/z_old
