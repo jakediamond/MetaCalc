@@ -20,7 +20,7 @@ df_met <- readRDS(file.path("data", "dampierre_metabolism_clean.RDS"))
 df_o2 <- readRDS(file.path("data", "hourly_o2_system.RDS"))
 
 # Load carbonate system data with uncertainty for CO2
-df_carb <- readRDS(file.path("data", "hourly_carbonate_system.RDS"))
+df_carb <- readRDS(file.path("data", "hourly_carbonate_system_v2.RDS"))
 
 # Calculate Schmidt number CO2 (2 eqns in Raymond et al. 2012), and 1 in Wanninkoff 2014
 df_sc <- df_carb |>
@@ -105,5 +105,5 @@ df_save <- df_FCO2 |>
   left_join(select(df_met_err, -contains("K600"))) |>
   mutate(across(contains(c("GPP", "ER", "NEP")), ~.*1000/32)) #from g O2 to mmmol
 
-saveRDS(df_save, file = file.path("data", "nep_fco2_uncertainty.RDS"))
+saveRDS(df_save, file = file.path("data", "nep_fco2_uncertainty_v2.RDS"))
 

@@ -88,7 +88,24 @@ df_hetsink <- within(df_group,
                                                           arch_l == 1),
                                                   `+`, -3:3),
                                            -3:3))
-# 71/92 (77%) events are prefaced by autotrophic sinks
+# 53/70 (76%) events are prefaced by autotrophic sinks
 filter(ungroup(df_hetsink), identifier == -1) |>
+  group_by(trophlux) |>
+  summarize(n = n())
+
+
+df_hetsink2 <- ungroup(df_group) %>%
+  group_by(archgroup) %>%
+  mutate(endgroup = if_else(arch_l == max(arch_l), 1, 0))
+
+
+df_hetsinkend <- within(df_hetsink2, 
+                     identifier <- replace(r,
+                                           sapply(which(trophlux=="heterotrophic sink" &
+                                                          endgroup == 1),
+                                                  `+`, -3:3),
+                                           -3:3))
+# 34/70 (50%) events are followed by autotrophic sinks and heterotrophic sources
+filter(ungroup(df_hetsinkend), identifier == 1) |>
   group_by(trophlux) |>
   summarize(n = n())

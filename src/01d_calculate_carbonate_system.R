@@ -22,8 +22,8 @@ df_pH <- readxl::read_xlsx(file.path("data", "05_hourly_data_clean", "2.Dampierr
   
 # Load hourly Alkalinity data, calculated by me from regression with SpC, discharge, and Ca
 # Also, Ca, temperature, and specific conductance
-df_AT <- readRDS(file.path("data", "03_CO2", "hourly_SpC_AT_Ca_system.RDS")) |>
-  select(datetime, AT, temp, SpC, Ca)
+df_AT <- readRDS(file.path("data", "03_CO2", "hourly_SpC_AT_Ca_system_v2.RDS")) |>
+  select(datetime, AT,  SpC, Ca, temp)
 
 # Join these and clean a bit
 df_carb <- left_join(df_AT, df_pH) |>
@@ -39,10 +39,10 @@ df_carb <- df_carb |>
 
 # Estimate the potential carbonate system at a given alkalinity and atm CO2
 # This takes a while because it's an iterative solver
-df_pot <- readRDS(file.path("data", "03_CO2", "all_hourly_data.RDS")) |> # this file has the atm. data
-  janitor::clean_names() |>
-  select(datetime, pCO2_atm = atmosphere_co2_ppmv) |>
-  right_join(select(df, datetime, AT, SpC, temp)) |>
+df_pot <- readRDS(file.path("data", "03_CO2", "all_hourly_data.RDS")) %>%# this file has the atm. data
+  janitor::clean_names() %>%
+  select(datetime, pCO2_atm = atmosphere_co2_ppmv) %>%
+  right_join(select(df_AT, datetime, AT, SpC, temp)) %>%
   # Last observation carried forward for filling in NAs at end of file for atm CO2
   imputeTS::na_locf() |>
   mutate(carbeq = seacarb::carb(flag = 24, 
@@ -78,9 +78,10 @@ df <- df_pot |>
   right_join(df_carb) |>
   left_join(select(df_err, datetime, ers, temp) |> 
               unnest(ers) |>
-              mutate(dCO2_uM = CO2 * rhow(temp) * 1000) |>
-              select(datetime, dCO2_uM)) |>
+              mutate(dCO2_uM = CO2 * rhow(temp) * 1000,
+                     dDIC_uM = DIC * rhow(temp) * 1000) |>
+              select(datetime, dCO2_uM, dDIC_uM)) |>
   rename(atmCO2_uatm = pCO2_atm)
 
 # Save data
-saveRDS(df, file.path("data", "hourly_carbonate_system.RDS"))
+saveRDS(df, file.path("data", "hourly_carbonate_system_v2.RDS"))

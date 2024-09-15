@@ -163,9 +163,9 @@ htmltools::browsable(p)
 
 # Final dataframe to save
 df_final <- df_pred_hr |>
-  select(-ATregsimp, -temp, -pH) |>
+  select(-ATregsimp, -pH) |>
   rename(Ca = Ca_rf, AT = ATreg) |>
-  select(date, datetime, discharge, depth, SpC, Ca, AT)
+  select(date, datetime, discharge, depth, SpC, Ca, AT, temp)
 
 # Save new hourly data
-saveRDS(df_final, file.path("data", "03_CO2", "hourly_SpC_AT_Ca_system.RDS"))
+saveRDS(df_final, file.path("data", "03_CO2", "hourly_SpC_AT_Ca_system_v2.RDS"))

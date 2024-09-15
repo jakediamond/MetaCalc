@@ -9,10 +9,196 @@ library(htmltools)
 library(tidyverse)
 library(patchwork)
 
+source(file.path("src", "000_carbonate_functions.R"))
+
 # Load data ---------------------------------------------------------------
 df_nepco2 <- readRDS(file.path("data", "daily_trophlux.RDS"))
 df <- readRDS(file.path("data", "hourly_data.RDS")) |>
   mutate(wy = if_else(month(date) > 8, year + 1, year))
+
+
+# Some summaries ----------------------------------------------------------
+# Quick histogram of FCO2
+x <- df_nepco2$value_FCO2_mean
+y <- x[x > 0]
+q <- df_nepco2$Q_m3s
+hist(x)
+hist(y)
+hist(q)
+hist(log(x))
+hist(log(y))
+hist(log(q))
+mean(y)
+exp(mean(log(y)))
+shapiro.test(sample(x, size = 5000))
+shapiro.test(sample(log(y), size = 5000))
+
+# Summary of CO2
+summary(df$CO2_uM)
+df %>% transmute(exCO2 = CO2_uM - CO2eq_uM) %>%
+  summary(exCO2)
+
+df |>
+  filter(NEP > 0, FCO2_enh < 0) |>
+  summarize(p=median(pCO2_uatm, na.rm = T))
+
+quantile(df$FCO2_enh, na.rm = T) / 1000 * 12
+mean(df$FCO2_enh, na.rm = T) / 1000 * 12
+
+quantile(df$NEP_mean, na.rm = T) / 1000 * 12
+mean(df$NEP_mean, na.rm = T) / 1000 * 12
+
+mean(df$FCO2_enh, na.rm = T) * 365 / 1000 * 12
+sd(df$FCO2_enh, na.rm = T) * 365 / 1000 * 12 / sqrt(283777)
+median(df$FCO2_enh, na.rm = T) * 365 / 1000 * 12
+quantile(df$FCO2_enh, na.rm = T) * 365 / 1000 * 12
+mean(df$pCO2_uatm, na.rm = T)
+sd(df$pCO2_uatm, na.rm = T)
+median(df$pCO2_uatm, na.rm = T)
+
+
+
+df |>
+  group_by(troph) |>
+  summarize(n = n())
+
+df_y <- df_nepco2 |>
+  mutate(wy = if_else(month(date) > 8, year + 1, year)) |>
+  group_by(wy) |>
+  filter(n() > 360) |>
+  summarize(fco2_y = sum(filtered_FCO2_mean, na.rm = T),
+            nep_y = sum(filtered_NEP_mean, na.rm = T))
+
+# Look at discharge sampling bias
+df_y_est <- df_nepco2 |>
+  mutate(wy = if_else(month(date) > 8, year + 1, year)) |>
+  group_by(wy) |>
+  filter(n() > 360) |>
+  nest() %>%
+  mutate(Q_mean = map(data, ~filter(., Q_m3s <= 300)),
+         Q_75   = map(data, ~filter(., Q_m3s <= 409)),
+         Q_80   = map(data, ~filter(., Q_m3s <= 471)),
+         Q_90   = map(data, ~filter(., Q_m3s <= 659))) %>%
+  mutate(Q_50_30 = map(Q_mean, ~slice_sample(., n = 30) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_50_50 = map(Q_mean, ~slice_sample(., n = 50) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_50_100 = map(Q_mean,~slice_sample(., n = 100) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_75_30 = map(Q_75,     ~slice_sample(., n = 30) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_75_50 = map(Q_75,     ~slice_sample(., n = 50) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_75_100 = map(Q_75,    ~slice_sample(., n = 100) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_80_30 = map(Q_80,     ~slice_sample(., n = 30) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_80_50 = map(Q_80,     ~slice_sample(., n = 50) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_80_100 = map(Q_80,    ~slice_sample(., n = 100) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_90_30 = map(Q_90,     ~slice_sample(., n = 30) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_90_50 = map(Q_90,     ~slice_sample(., n = 50) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T))),
+         Q_90_100 = map(Q_90,    ~slice_sample(., n = 100) %>% summarize(mean = mean(value_FCO2_mean, na.rm = T)))) %>%
+  select(wy, Q_50_30:Q_90_100) %>%
+  unnest(cols = -wy, names_sep = ".") %>%
+  rename_with((~stringr::str_replace(.,"^Q_",""))) %>%
+  rename_with((~stringr::str_replace(.,".mean",""))) %>%
+  pivot_longer(cols = -wy, names_sep = "_", names_to = c("Qfrac", "samp")) %>%
+  mutate(year_est = value * 365) %>%
+  right_join(df_y) %>%
+  ungroup() %>%
+  mutate(diff_fco2 = year_est - fco2_y) %>%
+  mutate(perdif_fco2 = diff_fco2 / fco2_y * 100,
+         Qfrac = as.numeric(Qfrac),
+         samp = as.numeric(samp))
+
+ggplot(data = df_y_est,
+       aes(x = samp,
+          y = perdif_fco2,
+          color = Qfrac,
+          group = Qfrac)) +
+  stat_summary()
+
+mean(df_y$fco2_y) / 1000 * 12
+sd(df_y$fco2_y) / 1000 * 12
+quantile(df_y$fco2_y) / 1000 * 12
+
+mean(df_nepco2$value_FCO2_mean)*365/ 1000 * 12
+median(df_nepco2$value_FCO2_mean)*365/ 1000 * 12
+
+mean(df_nepco2$filtered_FCO2_mean)*365/ 1000 * 12
+median(df_nepco2$filtered_FCO2_mean)*365/ 1000 * 12
+
+mean(df_y$nep_y) / 1000 * 12
+sd(df_y$nep_y) / 1000 * 12
+quantile(df_y$nep_y) / 1000 * 12
+
+
+
+# Try with weighted mean for kco2 -----------------------------------------
+# Look at discharge sampling bias
+df_y_est_wt <- df_nepco2 |>
+  mutate(wy = if_else(month(date) > 8, year + 1, year)) |>
+  group_by(wy) |>
+  filter(n() > 360) |>
+  left_join(select(df, date, KCO2 = KCO2_mean, z = depth_m) %>%
+              group_by(date) %>%
+              summarize(kco2 = mean(KCO2) * mean(z)) %>%
+              ungroup()) %>%
+  drop_na(value_FCO2_mean, kco2) %>%
+  nest() %>%
+  mutate(Q_mean = map(data, ~filter(., Q_m3s <= 300)),
+         Q_75   = map(data, ~filter(., Q_m3s <= 409)),
+         Q_80   = map(data, ~filter(., Q_m3s <= 471)),
+         Q_90   = map(data, ~filter(., Q_m3s <= 659))) %>%
+  mutate(Q_50_30 = map(Q_mean, ~slice_sample(., n = 30) %>% summarize(mean    = weighted.mean(value_FCO2_mean, kco2))), 
+         Q_50_50 = map(Q_mean, ~slice_sample(., n = 50) %>% summarize(mean    = weighted.mean(value_FCO2_mean, kco2))), 
+         Q_50_100 = map(Q_mean,~slice_sample(., n = 100) %>% summarize(mean   = weighted.mean(value_FCO2_mean, kco2))),
+         Q_75_30 = map(Q_75,     ~slice_sample(., n = 30) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_75_50 = map(Q_75,     ~slice_sample(., n = 50) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_75_100 = map(Q_75,    ~slice_sample(., n = 100) %>% summarize(mean = weighted.mean(value_FCO2_mean, kco2))),
+         Q_80_30 = map(Q_80,     ~slice_sample(., n = 30) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_80_50 = map(Q_80,     ~slice_sample(., n = 50) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_80_100 = map(Q_80,    ~slice_sample(., n = 100) %>% summarize(mean = weighted.mean(value_FCO2_mean, kco2))),
+         Q_90_30 = map(Q_90,     ~slice_sample(., n = 30) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_90_50 = map(Q_90,     ~slice_sample(., n = 50) %>% summarize(mean  = weighted.mean(value_FCO2_mean, kco2))),
+         Q_90_100 = map(Q_90,    ~slice_sample(., n = 100) %>% summarize(mean = weighted.mean(value_FCO2_mean, kco2)))) %>%
+  select(wy, Q_50_30:Q_90_100) %>%
+  unnest(cols = -wy, names_sep = ".") %>%
+  rename_with((~stringr::str_replace(.,"^Q_",""))) %>%
+  rename_with((~stringr::str_replace(.,".mean",""))) %>%
+  pivot_longer(cols = -wy, names_sep = "_", names_to = c("Qfrac", "samp")) %>%
+  mutate(year_est = value * 365) %>%
+  right_join(df_y) %>%
+  ungroup() %>%
+  mutate(diff_fco2 = year_est - fco2_y) %>%
+  mutate(perdif_fco2 = diff_fco2 / fco2_y * 100,
+         Qfrac = as.numeric(Qfrac),
+         samp = as.numeric(samp))
+
+ggplot(data = df_y_est_wt,
+       aes(x = samp,
+           y = perdif_fco2,
+           color = Qfrac,
+           group = Qfrac)) +
+  stat_summary()
+
+
+# Some more summaries -----------------------------------------------------
+df_nepco2 %>%
+  ungroup() %>%
+  filter(trophlux == "heterotrophic source") %>%
+  mutate(rat = -filtered_NEP_mean / filtered_FCO2_mean) %>%
+  summarize(int = quantile(rat))
+
+df_nepco2 %>%
+  filter(trophlux == "autotrophic sink") %>%
+  mutate(rat = -filtered_NEP_mean / filtered_FCO2_mean) %>%
+  summarize(int = quantile(rat))
+
+df_nepco2 %>%
+  filter(trophlux %in% c("autotrophic sink", "heterotrophic source")) %>%
+  mutate(rat = -filtered_NEP_mean / filtered_FCO2_mean) %>%
+  summarize(int = quantile(rat))
+
+df_nepco2 %>%
+  filter(trophlux %in% c("autotrophic sink", "heterotrophic sink")) %>%
+  group_by(year) %>%
+  summarize(int = sum(filtered_FCO2_mean)) %>%
+  ungroup() %>%
+  summarize(quan = quantile(int))
 
 quantile(df_nepco2$filtered_FCO2_mean)
 quantile(df_nepco2$filtered_NEP_mean)
@@ -169,6 +355,7 @@ df_arch <- df_nepco2 %>%
   group_by(archetype, year, state) %>%
   summarize(archtot = sum(filtered_CO2_meanenh))
 
+
 # Summary
 df_arch %>%
   left_join(df_y) %>%
@@ -187,8 +374,18 @@ df_y2 <- df_nepco2 %>%
 
 df_arch2 <- df_nepco2 %>%
   mutate(state = if_else(year < 2005, "planktonic", "benthic")) %>%
-  group_by(archetype, state, year) %>%
+  group_by(trophlux, state, year) %>%
   summarize(narch = n())
+
+df_arch3 <- df_nepco2 %>%
+  group_by(sourcesink, year) %>%
+  summarize(narch = n())
+z= filter(df_nepco2, year == 2016)
+ggplot(z, aes(x = date,
+             y = filtered_FCO2_mean,
+             color = sourcesink,
+              group = 1)) +
+  geom_line()
 
 df_arch2 %>%
   left_join(df_y2) %>%
@@ -197,6 +394,25 @@ df_arch2 %>%
   mutate(prop = narch / n) %>%
   summarize(mn = median(prop, na.rm = T),
             sn = sd(prop, na.rm = T))
+
+# Compare hourly vs mean daily -------------------------------------------------
+df_daily <- df %>%
+  select(date, depth_m, CO2eq_uM, KCO2_mean, enh, temp, AT_mM, pH, SpC) %>%
+  group_by(date) %>%
+  summarize(across(where(is.numeric), mean)) %>%
+  mutate(CO2_uM = DIC(temp+273.15, AT_mM, pH, SpC)$CO2_uM) %>%
+  mutate(FCO2_mean = (CO2_uM - CO2eq_uM) * KCO2_mean * depth_m *enh) %>%
+  left_join(select(df_nepco2, date, troph, sourcesink, FCO2_sum = value_FCO2_mean))
+
+ungroup(df_daily) %>%
+  group_by(sourcesink) %>%
+  mutate(ratio = FCO2_mean / FCO2_sum,
+         bias = FCO2_mean - FCO2_sum) %>%
+  summarize(mean_rat = mean(ratio, na.rm = T),
+            sd_rat = sd(ratio, na.rm = T),
+            mean_bi = mean(bias, na.rm = T),
+            sd_bi = sd(bias, na.rm = T))
+
 
 # How often is NEP 0 or CO2 0 ---------------------------------------------
 
@@ -298,3 +514,13 @@ sd(x$NEP/-x$NEP_d, na.rm = T)
   ggplotly()
 
 quantile(x$NEP/-x$NEP_d, na.rm = T)
+
+
+# test something different for kco2 weighting -----------------------------
+# get the mean exCO2 for each year with kco2 weighting
+df_k <- df %>%
+  drop_na(exCO2, KCO2_mean, depth_m) %>%
+  summarize(mean_exCO2 = weighted.mean(exCO2, KCO2_mean * depth_m),
+            mean_kco2 = mean(KCO2_mean * depth_m)) %>%
+  mutate(FCO2 = mean_exCO2 * mean_kco2)
+mean(df$FCO2, na.rm = T)
